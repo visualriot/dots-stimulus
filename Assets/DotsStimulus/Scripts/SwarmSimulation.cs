@@ -12,7 +12,7 @@ namespace DotsStimulus
         public NeighbourRule rule = NeighbourRule.Metric;
         public double metricRadius = 2.0;
         // MATLAB's kth distance includes self and includes all ties at that distance.
-        public int topologicalK = 3;
+        public int topologicalK = 2;
         public double topologicalRadiusCap = 1000;
         public double speed = 3;
         public double noise = 0;

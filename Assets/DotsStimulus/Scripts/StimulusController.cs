@@ -1,108 +1,217 @@
+using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.XR;
 
 namespace DotsStimulus
 {
+    public enum StimulusPresentationMode { Desktop, VirtualReality }
+
     [RequireComponent(typeof(DotFieldRenderer))]
     public sealed class StimulusController : MonoBehaviour
     {
-        public SwarmSettings settings = new SwarmSettings { dimension2D = false };
+        [Header("MATLAB simulation (metres and seconds)")]
+        [Tooltip("Copied into the active simulation when Play begins. Runtime controls keep applicable values synchronized.")]
+        public SwarmSettings settings = new SwarmSettings();
+
+        [Header("Presentation")]
+        [Tooltip("Selects the presentation rig only. Desktop uses a fixed orthographic 2D view or mouse-look 3D preview; Virtual Reality uses the tracked OpenXR headset. The swarm algorithm is identical.")]
+        public StimulusPresentationMode presentationMode = StimulusPresentationMode.Desktop;
+        [Tooltip("Camera used to display the stimulus. Assigned automatically by the scene creator: the desktop camera or the tracked XR headset camera.")]
         public Camera viewer;
-        [Tooltip("Start in 3D, centre the volume around the camera, hide the aperture, and enable mouse/WASD controls. Disable for the original monitor/VR setup.")]
-        public bool desktopPreview = true;
+        [Tooltip("VR only. Wait for a valid tracked head pose, align the stimulus to it once, then leave the stimulus world-fixed. C performs a manual realignment.")]
+        public bool alignToFirstValidHeadPose = true;
+
+        [Header("Randomization")]
+        [Tooltip("On: choose a new seed whenever Play starts, matching MATLAB rng('shuffle'). Off: use Seed below for repeatable Unity runs.")]
         public bool randomizeSeed = true;
+        [Tooltip("Seed used only when Randomize Seed is off. The same Unity seed repeats a Unity run, but MATLAB uses a different random-number generator.")]
         public int seed = 12345;
+        [Tooltip("Start the simulation paused. Space toggles pause without regenerating the dots.")]
         public bool paused;
+
+        [Header("Arrow-key presets")]
+        [Tooltip("MATLAB possible_radius values stepped through by Up/Down when Neighbour Rule is Metric. Values are interaction radii in metres.")]
+        public double[] metricRadiusPresets = { 0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 1000 };
+        [Tooltip("MATLAB possible_num_n values stepped through by Up/Down when Neighbour Rule is Topological. K includes the dot itself; ties can include more than K dots.")]
+        public int[] topologicalKPresets = { 2, 3, 5, 9, 17, 33 };
+
         public SwarmSimulation Simulation { get; private set; }
+        [SerializeField, Tooltip("Actual seed used by the active simulation; assigned when Play begins.")]
+        private int actualSeed;
+        public int ActualSeed => actualSeed;
+        public double LastStepDeltaSeconds { get; private set; }
+        public bool HasAlignedToHeadPose { get; private set; }
+        public DotFieldRenderer Display => display;
+        public event Action<string, string> ControlEvent;
+
         private DotFieldRenderer display;
         private double previousTime;
         private bool firstFrame = true;
-        private static readonly double[] Radii = { 0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 1000 };
-        private static readonly double[] Counts = { 2, 3, 5, 9, 17, 33 };
 
         private void Start()
         {
             if (!viewer) viewer = Camera.main;
             display = GetComponent<DotFieldRenderer>();
-            if (desktopPreview)
+            if (!viewer)
             {
-                if (!viewer) { Debug.LogError("Desktop preview needs a Viewer camera.", this); enabled = false; return; }
-                settings.dimension2D = false;
-                display.useAperture = false;
-                DesktopFlyCamera.Configure(viewer);
-                // Translate only the presentation. Local MATLAB coordinates remain z=50..70.
-                // Place their centre at the camera, giving a world-fixed cube around the player.
-                var localCentre = new Vector3(0, 0, (float)(settings.startDepth + settings.depth / 2));
-                transform.position = viewer.transform.position - transform.TransformVector(localCentre);
+                Debug.LogError("Dots stimulus requires a Viewer camera.", this);
+                enabled = false;
+                return;
             }
-            int actualSeed = randomizeSeed ? System.Environment.TickCount : seed;
+
+            if (presentationMode == StimulusPresentationMode.Desktop)
+                DesktopFlyCamera.Configure(viewer).SetTwoDimensional(settings.dimension2D);
+
+            actualSeed = randomizeSeed ? Environment.TickCount : seed;
             Simulation = new SwarmSimulation(settings, actualSeed);
+            display.presentationMode = presentationMode;
+            display.SetPresentationCamera(viewer);
             display.Initialize(Simulation);
             previousTime = Time.realtimeSinceStartupAsDouble;
-            Debug.Log($"Dots stimulus: seed={actualSeed}, N={settings.count}, rule={settings.rule}, 3D={!settings.dimension2D}. " +
-                (desktopPreview ? "Hold right mouse to look; WASD to move; Q/E down/up; Shift faster; C return to centre; R restart; Space pause; Escape release mouse; F10 quit." : "C repositions the field; D toggles dimension; A toggles aperture."));
+            Emit("started", $"seed={actualSeed};mode={presentationMode};dimension={(settings.dimension2D ? "2D" : "3D")}");
+            Debug.Log($"Dots stimulus: seed={actualSeed}, N={settings.count}, rule={settings.rule}, dimension={(settings.dimension2D ? "2D" : "3D")}. " +
+                "D 2D/3D; A aperture; R restart; arrows parameter; Space pause; C reset/realign view; Escape stop.");
         }
 
         private void Update()
         {
             if (Simulation == null) return;
+            if (presentationMode == StimulusPresentationMode.VirtualReality && alignToFirstValidHeadPose && !HasAlignedToHeadPose)
+                TryAlignToTrackedHead();
+
             var keyboard = Keyboard.current;
-            bool reset = false;
             if (keyboard != null)
             {
-                if ((desktopPreview && keyboard.f10Key.wasPressedThisFrame) || (!desktopPreview && keyboard.escapeKey.wasPressedThisFrame)) { Quit(); return; }
-                if (!desktopPreview && keyboard.dKey.wasPressedThisFrame)
+                if (keyboard.escapeKey.wasPressedThisFrame) { Emit("quit", "escape"); Quit(); return; }
+                if (keyboard.dKey.wasPressedThisFrame)
                 {
-                    Simulation.Settings.dimension2D = !Simulation.Settings.dimension2D;
-                    settings.dimension2D = Simulation.Settings.dimension2D;
-                    reset = true;
+                    settings.dimension2D = !settings.dimension2D;
+                    Simulation.Settings.dimension2D = settings.dimension2D;
+                    Restart("dimension", settings.dimension2D ? "2D" : "3D");
+                    if (presentationMode == StimulusPresentationMode.VirtualReality)
+                    {
+                        Recenter();
+                    }
+                    else
+                    {
+                        var controls = viewer.GetComponent<DesktopFlyCamera>();
+                        if (controls) controls.SetTwoDimensional(settings.dimension2D);
+                    }
                 }
-                else if (keyboard.rKey.wasPressedThisFrame) reset = true;
-                else if (!desktopPreview && keyboard.aKey.wasPressedThisFrame) display.useAperture = !display.useAperture;
-                else if (keyboard.upArrowKey.wasPressedThisFrame) { ChangeParameter(1); reset = true; }
-                else if (keyboard.downArrowKey.wasPressedThisFrame) { ChangeParameter(-1); reset = true; }
+                else if (keyboard.rKey.wasPressedThisFrame) Restart("restart", "keyboard");
+                else if (keyboard.aKey.wasPressedThisFrame)
+                {
+                    display.useAperture = !display.useAperture;
+                    Emit("aperture", display.useAperture ? "enabled" : "disabled");
+                }
+                else if (keyboard.upArrowKey.wasPressedThisFrame) { ChangeParameter(1); Restart("parameter", "up"); }
+                else if (keyboard.downArrowKey.wasPressedThisFrame) { ChangeParameter(-1); Restart("parameter", "down"); }
+
                 if (keyboard.cKey.wasPressedThisFrame) Recenter();
-                if (keyboard.spaceKey.wasPressedThisFrame) paused = !paused;
+                if (keyboard.spaceKey.wasPressedThisFrame)
+                {
+                    paused = !paused;
+                    Emit("pause", paused ? "paused" : "resumed");
+                }
             }
-            if (reset) { Simulation.Reset(); firstFrame = true; }
-            // Upload old state, then calculate next state: MATLAB draws before alignment/movement.
+
             display.Present(Simulation);
             double now = Time.realtimeSinceStartupAsDouble;
             double dt = now - previousTime;
             previousTime = now;
+            LastStepDeltaSeconds = 0;
             if (paused || firstFrame) { firstFrame = false; return; }
+            LastStepDeltaSeconds = dt;
             Simulation.Step(dt);
+        }
+
+        public void Restart(string eventName = "restart", string detail = "api")
+        {
+            if (Simulation == null) return;
+            Simulation.Reset();
+            firstFrame = true;
+            LastStepDeltaSeconds = 0;
+            Emit(eventName, detail);
         }
 
         public void Recenter()
         {
             if (!viewer) return;
-            if (desktopPreview)
+            if (presentationMode == StimulusPresentationMode.Desktop)
             {
                 var controls = viewer.GetComponent<DesktopFlyCamera>();
                 if (controls) controls.ResetView();
+                Emit("desktop_view_reset", "initial_pose");
                 return;
             }
-            // Move the stimulus coordinate system once, never parent it to the tracked camera.
+
             transform.SetPositionAndRotation(viewer.transform.position, viewer.transform.rotation);
+            HasAlignedToHeadPose = true;
+            Emit("vr_stimulus_aligned", "manual");
+        }
+
+        private void TryAlignToTrackedHead()
+        {
+            UnityEngine.XR.InputDevice head = InputDevices.GetDeviceAtXRNode(XRNode.Head);
+            if (!head.isValid || !head.TryGetFeatureValue(UnityEngine.XR.CommonUsages.isTracked, out bool tracked) || !tracked) return;
+            transform.SetPositionAndRotation(viewer.transform.position, viewer.transform.rotation);
+            HasAlignedToHeadPose = true;
+            Emit("vr_stimulus_aligned", "first_valid_head_pose");
         }
 
         private void ChangeParameter(int increment)
         {
-            var s = Simulation.Settings;
-            double[] list = s.rule == NeighbourRule.Metric ? Radii : Counts;
-            double current = s.rule == NeighbourRule.Metric ? s.metricRadius : s.topologicalK;
-            int closest = 0;
-            for (int i = 1; i < list.Length; i++)
-                if (System.Math.Abs(list[i] - current) < System.Math.Abs(list[closest] - current)) closest = i;
-            double next = list[Mathf.Clamp(closest + increment, 0, list.Length - 1)];
-            if (s.rule == NeighbourRule.Metric) settings.metricRadius = s.metricRadius = next;
-            else settings.topologicalK = s.topologicalK = System.Math.Min((int)next, s.count);
-            Debug.Log($"Dots stimulus: radius={s.metricRadius}, k={s.topologicalK}, 2D={s.dimension2D}");
+            if (settings.rule == NeighbourRule.Metric)
+            {
+                if (metricRadiusPresets == null || metricRadiusPresets.Length == 0) return;
+                int closest = Closest(metricRadiusPresets, settings.metricRadius);
+                settings.metricRadius = metricRadiusPresets[Mathf.Clamp(closest + increment, 0, metricRadiusPresets.Length - 1)];
+                Simulation.Settings.metricRadius = settings.metricRadius;
+            }
+            else
+            {
+                if (topologicalKPresets == null || topologicalKPresets.Length == 0) return;
+                int closest = Closest(topologicalKPresets, settings.topologicalK);
+                settings.topologicalK = Math.Min(settings.count, Math.Max(1, topologicalKPresets[Mathf.Clamp(closest + increment, 0, topologicalKPresets.Length - 1)]));
+                Simulation.Settings.topologicalK = settings.topologicalK;
+            }
         }
 
-        private void OnApplicationFocus(bool hasFocus) { previousTime = Time.realtimeSinceStartupAsDouble; }
-        private void OnEnable() { previousTime = Time.realtimeSinceStartupAsDouble; }
+        private static int Closest(double[] values, double value)
+        {
+            int closest = 0;
+            for (int i = 1; i < values.Length; i++)
+                if (Math.Abs(values[i] - value) < Math.Abs(values[closest] - value)) closest = i;
+            return closest;
+        }
+
+        private static int Closest(int[] values, int value)
+        {
+            int closest = 0;
+            for (int i = 1; i < values.Length; i++)
+                if (Math.Abs(values[i] - value) < Math.Abs(values[closest] - value)) closest = i;
+            return closest;
+        }
+
+        public void Emit(string eventName, string detail) => ControlEvent?.Invoke(eventName, detail);
+
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            previousTime = Time.realtimeSinceStartupAsDouble;
+            if (Simulation != null) Emit("application_focus", hasFocus ? "gained" : "lost");
+        }
+
+        private void OnEnable() => previousTime = Time.realtimeSinceStartupAsDouble;
+
+        private void OnValidate()
+        {
+            if (metricRadiusPresets == null || metricRadiusPresets.Length == 0) metricRadiusPresets = new[] { 2.0 };
+            if (topologicalKPresets == null || topologicalKPresets.Length == 0) topologicalKPresets = new[] { 2 };
+            for (int i = 0; i < metricRadiusPresets.Length; i++) metricRadiusPresets[i] = Math.Max(0, metricRadiusPresets[i]);
+            for (int i = 0; i < topologicalKPresets.Length; i++) topologicalKPresets[i] = Math.Max(1, topologicalKPresets[i]);
+        }
+
         private static void Quit()
         {
 #if UNITY_EDITOR
