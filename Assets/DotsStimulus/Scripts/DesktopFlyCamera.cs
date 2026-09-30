@@ -1,40 +1,100 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.XR;
+using UnityEngine.Rendering.Universal;
+using UnityEngine.XR.Management;
 
 namespace DotsStimulus
 {
-    /// <summary>Desktop head-look and free movement. Does not move or rotate the swarm.</summary>
+    /// <summary>Fixed orthographic 2D view or rotation-only 3D substitute for a tracked head.</summary>
+    [DefaultExecutionOrder(-10000)]
     [RequireComponent(typeof(Camera))]
     public sealed class DesktopFlyCamera : MonoBehaviour
     {
-        [Min(.01f)] public float lookSensitivity = .12f;
-        [Min(.01f)] public float movementSpeed = 2;
-        [Min(1)] public float fastMultiplier = 3;
-        private float yaw, pitch;
+        [Header("Desktop head simulation (3D only)")]
+        [Tooltip("Stop the globally configured XR loader in desktop scenes and force this camera to render a normal monoscopic Game view.")]
+        public bool disableXrForDesktop = true;
+        [Tooltip("Degrees per mouse-delta unit while the right mouse button is held in 3D.")]
+        [Min(.001f)] public float mouseSensitivity = .12f;
+        [Tooltip("I/J/K/L pitch/yaw speed in degrees per second.")]
+        [Min(.01f)] public float keyboardRotationSpeed = 60f;
+        [Tooltip("Maximum upward or downward simulated-head rotation in 3D, in degrees. This prevents the desktop camera from flipping over.")]
+        [Range(1, 89.9f)] public float maximumPitch = 89f;
+
+        [Header("MATLAB display geometry")]
+        [Tooltip("Physical monitor width in metres (587 mm in the MATLAB source).")]
+        [Min(.01f)] public float displayWidthMetres = .587f;
+        [Tooltip("Eye-to-display distance in metres (715 mm in the MATLAB source).")]
+        [Min(.01f)] public float viewingDistanceMetres = .715f;
+        [Tooltip("MATLAB reference window width in pixels. The active source window is 800x600; this is used when viewport adaptation is off.")]
+        [Min(1)] public int referenceWidthPixels = 800;
+        [Tooltip("MATLAB reference window height in pixels. The active source window is 800x600; this is used when viewport adaptation is off.")]
+        [Min(1)] public int referenceHeightPixels = 600;
+        [Tooltip("Derive display height and vertical FOV from the active Game-view aspect, like MATLAB's Screenheight = Screenwidth / aspect. Disable for a fixed 800x600 reference projection.")]
+        public bool adaptFieldOfViewToViewport = true;
+        [Tooltip("Nearest distance rendered by the desktop camera, in metres. MATLAB z_near is 0.01 m.")]
+        [Min(.001f)] public float nearClipMetres = .01f;
+        [Tooltip("Farthest distance rendered by the desktop camera, in metres. MATLAB uses total_depth x 2 = 140 m with the default z=50-70 m volume.")]
+        [Min(.1f)] public float farClipMetres = 140f;
+
+        private float yaw;
+        private float pitch;
         private bool looking;
+        private bool twoDimensional;
         private Vector3 homePosition;
         private Quaternion homeRotation;
 
+        public bool IsTwoDimensional => twoDimensional;
+
+        public float DerivedVerticalFieldOfView
+        {
+            get
+            {
+                float aspect = referenceWidthPixels / (float)Mathf.Max(1, referenceHeightPixels);
+                return FieldOfViewForAspect(aspect);
+            }
+        }
+
+        public float FieldOfViewForAspect(float aspect)
+        {
+            float displayHeight = DisplayHeightForAspect(aspect);
+            return 2f * Mathf.Atan(displayHeight / (2f * viewingDistanceMetres)) * Mathf.Rad2Deg;
+        }
+
+        public float DisplayHeightForAspect(float aspect) => displayWidthMetres / Mathf.Max(.01f, aspect);
+
         public static DesktopFlyCamera Configure(Camera camera)
         {
-            // An old generated scene may still contain the VR pose driver.
             var trackedPose = camera.GetComponent<TrackedPoseDriver>();
             if (trackedPose) trackedPose.enabled = false;
-            camera.clearFlags = CameraClearFlags.SolidColor;
-            camera.backgroundColor = Color.black;
-            camera.rect = new Rect(0, 0, 1, 1);
-            camera.fieldOfView = 75;
-            camera.nearClipPlane = .05f;
-            camera.farClipPlane = 140;
-            camera.stereoTargetEye = StereoTargetEyeMask.None;
             var controls = camera.GetComponent<DesktopFlyCamera>();
             if (!controls) controls = camera.gameObject.AddComponent<DesktopFlyCamera>();
-            controls.enabled = true;
+            controls.ApplyCameraSettings();
             controls.CaptureHome();
             return controls;
         }
 
+        public void ApplyCameraSettings()
+        {
+            var camera = GetComponent<Camera>();
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = Color.black;
+            camera.rect = new Rect(0, 0, 1, 1);
+            ApplyProjection(camera);
+            camera.nearClipPlane = nearClipMetres;
+            camera.farClipPlane = farClipMetres;
+            camera.allowHDR = false;
+            camera.allowDynamicResolution = false;
+            camera.useOcclusionCulling = false;
+            camera.stereoTargetEye = StereoTargetEyeMask.None;
+            camera.GetUniversalAdditionalCameraData().allowXRRendering = false;
+        }
+
+        private void Awake()
+        {
+            if (disableXrForDesktop) StopXrSubsystems();
+            ApplyCameraSettings();
+        }
         private void OnEnable() => CaptureHome();
 
         public void CaptureHome()
@@ -50,6 +110,14 @@ namespace DotsStimulus
             ReadAngles();
         }
 
+        public void SetTwoDimensional(bool enabled)
+        {
+            twoDimensional = enabled;
+            ReleaseMouse();
+            if (twoDimensional) ResetView();
+            ApplyProjection(GetComponent<Camera>());
+        }
+
         private void ReadAngles()
         {
             yaw = transform.eulerAngles.y;
@@ -58,13 +126,14 @@ namespace DotsStimulus
 
         private void Update()
         {
-            var keyboard = Keyboard.current;
-            var mouse = Mouse.current;
-            if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
+            if (twoDimensional)
             {
                 ReleaseMouse();
                 return;
             }
+
+            var keyboard = Keyboard.current;
+            var mouse = Mouse.current;
             if (mouse != null)
             {
                 if (mouse.rightButton.wasPressedThisFrame)
@@ -77,21 +146,57 @@ namespace DotsStimulus
                 if (mouse.rightButton.wasReleasedThisFrame) ReleaseMouse();
                 if (looking)
                 {
-                    // Mouse delta is already displacement this frame; do not multiply by dt.
-                    var delta = mouse.delta.ReadValue();
-                    yaw += delta.x * lookSensitivity;
-                    pitch = Mathf.Clamp(pitch - delta.y * lookSensitivity, -89, 89);
-                    transform.rotation = Quaternion.Euler(pitch, yaw, 0);
+                    Vector2 delta = mouse.delta.ReadValue();
+                    yaw += delta.x * mouseSensitivity;
+                    pitch -= delta.y * mouseSensitivity;
                 }
             }
-            if (keyboard == null) return;
-            float right = (keyboard.dKey.isPressed ? 1 : 0) - (keyboard.aKey.isPressed ? 1 : 0);
-            float forward = (keyboard.wKey.isPressed ? 1 : 0) - (keyboard.sKey.isPressed ? 1 : 0);
-            float up = (keyboard.eKey.isPressed ? 1 : 0) - (keyboard.qKey.isPressed ? 1 : 0);
-            var movement = transform.right * right + transform.forward * forward + Vector3.up * up;
-            movement = Vector3.ClampMagnitude(movement, 1);
-            float speed = movementSpeed * (keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed ? fastMultiplier : 1);
-            transform.position += movement * (speed * Time.unscaledDeltaTime);
+
+            if (keyboard != null)
+            {
+                float seconds = Time.unscaledDeltaTime;
+                yaw += ((keyboard.lKey.isPressed ? 1f : 0f) - (keyboard.jKey.isPressed ? 1f : 0f)) * keyboardRotationSpeed * seconds;
+                pitch += ((keyboard.iKey.isPressed ? 1f : 0f) - (keyboard.kKey.isPressed ? 1f : 0f)) * keyboardRotationSpeed * seconds;
+            }
+
+            pitch = Mathf.Clamp(pitch, -maximumPitch, maximumPitch);
+            transform.rotation = Quaternion.Euler(pitch, yaw, 0f);
+        }
+
+        private void LateUpdate()
+        {
+            var camera = GetComponent<Camera>();
+            float aspect = EffectiveAspect(camera);
+            if (twoDimensional)
+            {
+                float requiredSize = DisplayHeightForAspect(aspect) * .5f;
+                if (!Mathf.Approximately(camera.orthographicSize, requiredSize)) camera.orthographicSize = requiredSize;
+            }
+            else
+            {
+                float requiredFov = FieldOfViewForAspect(aspect);
+                if (!Mathf.Approximately(camera.fieldOfView, requiredFov)) camera.fieldOfView = requiredFov;
+            }
+        }
+
+        private void ApplyProjection(Camera camera)
+        {
+            float aspect = EffectiveAspect(camera);
+            camera.orthographic = twoDimensional;
+            camera.orthographicSize = DisplayHeightForAspect(aspect) * .5f;
+            camera.fieldOfView = FieldOfViewForAspect(aspect);
+        }
+
+        private float EffectiveAspect(Camera camera) => adaptFieldOfViewToViewport
+            ? camera.aspect
+            : referenceWidthPixels / (float)Mathf.Max(1, referenceHeightPixels);
+
+        private static void StopXrSubsystems()
+        {
+            XRManagerSettings manager = XRGeneralSettings.Instance != null ? XRGeneralSettings.Instance.Manager : null;
+            if (manager == null || manager.activeLoader == null) return;
+            manager.StopSubsystems();
+            manager.DeinitializeLoader();
         }
 
         private void ReleaseMouse()
@@ -100,6 +205,11 @@ namespace DotsStimulus
             looking = false;
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
+        }
+
+        private void OnValidate()
+        {
+            if (TryGetComponent(out Camera camera)) ApplyCameraSettings();
         }
 
         private void OnDisable() => ReleaseMouse();
