@@ -28,12 +28,14 @@ namespace DotsStimulus.Editor
             controls.referenceWidthPixels = 800;
             controls.referenceHeightPixels = 600;
             controls.adaptFieldOfViewToViewport = true;
+            controls.scrollZoomMetresPerNotch = 1f;
+            controls.middleDragPanMetresPerPixel = .01f;
             controls.ApplyCameraSettings();
 
             StimulusController controller = CreateStimulus(camera, StimulusPresentationMode.Desktop, true);
             string path = SaveUnique(scene, "DesktopStimulus.unity");
             Selection.activeGameObject = controller.gameObject;
-            Debug.Log("Created " + path + ". Desktop starts in 2D filling the Game view. D switches to the immersive 3D preview; RMB or I/J/K/L rotates the simulated head; C resets it.");
+            Debug.Log("Created " + path + ". Desktop starts in 2D filling the Game view. D switches to the immersive 3D preview; RMB or I/J/K/L rotates, the mouse wheel moves forward/back, middle-mouse drag pans, and C resets the simulated head.");
         }
 
         [MenuItem("Tools/Dots Stimulus/Create VR stimulus")]
@@ -77,7 +79,6 @@ namespace DotsStimulus.Editor
             camera.allowHDR = false;
             camera.allowDynamicResolution = false;
             camera.useOcclusionCulling = false;
-            camera.stereoTargetEye = stereo ? StereoTargetEyeMask.Both : StereoTargetEyeMask.None;
             UniversalAdditionalCameraData data = camera.GetUniversalAdditionalCameraData();
             data.renderPostProcessing = false;
             data.antialiasing = AntialiasingMode.None;
@@ -98,8 +99,8 @@ namespace DotsStimulus.Editor
             renderer.diameterPixels = 6;
             renderer.useAngularSize = false;
             renderer.fillDesktop2DViewport = true;
-            renderer.centreDesktop3DOnViewer = true;
-            renderer.centreVrVolumeOnViewer = true;
+            renderer.viewerPlacement = ViewerPlacement.Centre;
+            renderer.outsideClearance = 10f;
             renderer.useApertureInImmersive3D = false;
             renderer.vr2DDisplayWidth = .587f;
             renderer.vr2DDisplayHeight = .44025f;
@@ -117,6 +118,10 @@ namespace DotsStimulus.Editor
             controller.settings.speed = 3;
             controller.settings.width = controller.settings.height = controller.settings.depth = 20;
             controller.settings.startDepth = 50;
+            controller.settings.volumeShape = VolumeShape.Box;
+            controller.settings.sphereRadius = 10;
+            controller.settings.boundaryBuffer = 1;
+            controller.settings.boundaryMode = BoundaryMode.MagneticSteering;
             controller.settings.wrapX = controller.settings.wrapY = controller.settings.wrapZ = true;
             return controller;
         }

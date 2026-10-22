@@ -37,10 +37,17 @@ namespace DotsStimulus.Editor.Tests
                 var renderer = stimulus.GetComponent<DotFieldRenderer>();
                 Assert.That(renderer.useAperture, Is.False);
                 Assert.That(renderer.fillDesktop2DViewport, Is.True);
-                Assert.That(renderer.centreDesktop3DOnViewer, Is.True);
-                Assert.That(stimulus.viewer.stereoTargetEye, Is.EqualTo(StereoTargetEyeMask.None));
+                Assert.That(renderer.viewerPlacement, Is.EqualTo(ViewerPlacement.Centre));
+                Assert.That(renderer.outsideClearance, Is.EqualTo(10));
+                Assert.That(stimulus.settings.volumeShape, Is.EqualTo(VolumeShape.Box));
+                Assert.That(stimulus.settings.sphereRadius, Is.EqualTo(10));
+                Assert.That(stimulus.settings.boundaryBuffer, Is.EqualTo(1));
+                Assert.That(stimulus.settings.boundaryMode, Is.EqualTo(BoundaryMode.MagneticSteering));
                 Assert.That(stimulus.viewer.GetUniversalAdditionalCameraData().allowXRRendering, Is.False);
-                Assert.That(stimulus.viewer.GetComponent<DesktopFlyCamera>().DerivedVerticalFieldOfView, Is.EqualTo(34.2238f).Within(.01f));
+                DesktopFlyCamera desktopCamera = stimulus.viewer.GetComponent<DesktopFlyCamera>();
+                Assert.That(desktopCamera.DerivedVerticalFieldOfView, Is.EqualTo(34.2238f).Within(.01f));
+                Assert.That(desktopCamera.scrollZoomMetresPerNotch, Is.EqualTo(1));
+                Assert.That(desktopCamera.middleDragPanMetresPerPixel, Is.EqualTo(.01f));
                 Assert.That(UnityEngine.Object.FindAnyObjectByType<EyeTrackingRecorder>(), Is.Null);
             }
             finally { DeleteGeneratedScene(path); }
@@ -60,8 +67,13 @@ namespace DotsStimulus.Editor.Tests
                 Assert.That(stimulus.presentationMode, Is.EqualTo(StimulusPresentationMode.VirtualReality));
                 Assert.That(stimulus.settings.dimension2D, Is.False);
                 Assert.That(stimulus.GetComponent<DotFieldRenderer>().useAperture, Is.True);
+                Assert.That(stimulus.GetComponent<DotFieldRenderer>().viewerPlacement, Is.EqualTo(ViewerPlacement.Centre));
+                Assert.That(stimulus.GetComponent<DotFieldRenderer>().outsideClearance, Is.EqualTo(10));
+                Assert.That(stimulus.settings.volumeShape, Is.EqualTo(VolumeShape.Box));
+                Assert.That(stimulus.settings.sphereRadius, Is.EqualTo(10));
+                Assert.That(stimulus.settings.boundaryBuffer, Is.EqualTo(1));
+                Assert.That(stimulus.settings.boundaryMode, Is.EqualTo(BoundaryMode.MagneticSteering));
                 Assert.That(origin, Is.Not.Null);
-                Assert.That(origin.Camera.stereoTargetEye, Is.EqualTo(StereoTargetEyeMask.Both));
                 Assert.That(origin.Camera.GetUniversalAdditionalCameraData().allowXRRendering, Is.True);
                 Assert.That(origin.Camera.GetComponent<TrackedPoseDriver>(), Is.Not.Null);
                 Assert.That(recorder, Is.Null);
@@ -159,6 +171,17 @@ namespace DotsStimulus.Editor.Tests
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 60), settings).z, Is.EqualTo(0).Within(1e-5));
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 70), settings).z, Is.EqualTo(10).Within(1e-5));
 
+                renderer.viewerPlacement = ViewerPlacement.Outside;
+                renderer.outsideClearance = 10;
+                Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 50), settings).z, Is.EqualTo(10).Within(1e-5), "box near face clearance");
+                Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 70), settings).z, Is.EqualTo(30).Within(1e-5));
+
+                settings.volumeShape = VolumeShape.Sphere;
+                settings.sphereRadius = 7;
+                renderer.outsideClearance = 4;
+                Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 50), settings).z, Is.EqualTo(4).Within(1e-5), "sphere near surface clearance");
+                Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 64), settings).z, Is.EqualTo(18).Within(1e-5));
+
                 settings.dimension2D = true;
                 Vector3 corner = renderer.MapPositionForPresentation(new DVector3(10, 10, 50), settings);
                 Assert.That(corner.x, Is.EqualTo(renderer.vr2DDisplayWidth * .5f).Within(1e-5));
@@ -185,7 +208,7 @@ namespace DotsStimulus.Editor.Tests
                 renderer.presentationMode = StimulusPresentationMode.Desktop;
                 renderer.mirrorMatlabX = false;
                 renderer.fillDesktop2DViewport = true;
-                renderer.centreDesktop3DOnViewer = true;
+                renderer.viewerPlacement = ViewerPlacement.Centre;
                 renderer.SetPresentationCamera(camera);
 
                 var settings = new SwarmSettings { width = 20, height = 20, depth = 20, startDepth = 50, dimension2D = true };
@@ -198,13 +221,44 @@ namespace DotsStimulus.Editor.Tests
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 50), settings).z, Is.EqualTo(-10).Within(1e-5));
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 70), settings).z, Is.EqualTo(10).Within(1e-5));
 
-                renderer.fillDesktop2DViewport = false;
-                renderer.centreDesktop3DOnViewer = false;
-                Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 50), settings).z, Is.EqualTo(50).Within(1e-5));
+                renderer.viewerPlacement = ViewerPlacement.Outside;
+                renderer.outsideClearance = 10;
+                Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 50), settings).z, Is.EqualTo(10).Within(1e-5));
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(rendererObject);
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void VrRecenterKeepsConfiguredOutsidePlacement()
+        {
+            var cameraObject = new GameObject("VR recenter camera", typeof(Camera));
+            var stimulusObject = new GameObject("VR recenter stimulus");
+            try
+            {
+                Camera camera = cameraObject.GetComponent<Camera>();
+                camera.transform.SetPositionAndRotation(new Vector3(2, 3, 4), Quaternion.Euler(5, 25, 0));
+                var renderer = stimulusObject.AddComponent<DotFieldRenderer>();
+                renderer.presentationMode = StimulusPresentationMode.VirtualReality;
+                renderer.viewerPlacement = ViewerPlacement.Outside;
+                renderer.outsideClearance = 10;
+                var controller = stimulusObject.AddComponent<StimulusController>();
+                controller.presentationMode = StimulusPresentationMode.VirtualReality;
+                controller.viewer = camera;
+
+                controller.Recenter();
+
+                Assert.That(stimulusObject.transform.position, Is.EqualTo(camera.transform.position));
+                Assert.That(Quaternion.Angle(stimulusObject.transform.rotation, camera.transform.rotation), Is.LessThan(1e-5));
+                Assert.That(renderer.viewerPlacement, Is.EqualTo(ViewerPlacement.Outside));
+                Assert.That(renderer.outsideClearance, Is.EqualTo(10));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(stimulusObject);
                 UnityEngine.Object.DestroyImmediate(cameraObject);
             }
         }
@@ -228,6 +282,64 @@ namespace DotsStimulus.Editor.Tests
                 Assert.That(controls.IsTwoDimensional, Is.False);
                 Assert.That(camera.orthographic, Is.False);
                 Assert.That(camera.fieldOfView, Is.EqualTo(controls.FieldOfViewForAspect(4f / 3f)).Within(1e-5));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(cameraObject); }
+        }
+
+        [Test]
+        public void DesktopMouseWheelMovesOnlyIn3DAndResetRestoresHome()
+        {
+            var cameraObject = new GameObject("Desktop scroll camera", typeof(Camera));
+            try
+            {
+                var controls = DesktopFlyCamera.Configure(cameraObject.GetComponent<Camera>());
+                controls.scrollZoomMetresPerNotch = 1.5f;
+                controls.SetTwoDimensional(false);
+                Vector3 home = cameraObject.transform.position;
+
+                controls.ApplyScrollZoom(1);
+                Assert.That(cameraObject.transform.position.z, Is.EqualTo(home.z + 1.5f).Within(1e-5),
+                    "Backends that report one unit per notch must produce visible movement");
+                controls.ApplyScrollZoom(-1);
+                Assert.That(cameraObject.transform.position, Is.EqualTo(home));
+
+                controls.ApplyScrollZoom(120);
+                Assert.That(cameraObject.transform.position.z, Is.EqualTo(home.z + 1.5f).Within(1e-5));
+                controls.ApplyScrollZoom(-120);
+                Assert.That(cameraObject.transform.position, Is.EqualTo(home));
+
+                controls.SetTwoDimensional(true);
+                controls.ApplyScrollZoom(120);
+                Assert.That(cameraObject.transform.position, Is.EqualTo(home), "2D must ignore wheel movement");
+
+                controls.SetTwoDimensional(false);
+                controls.ApplyScrollZoom(120);
+                controls.ResetView();
+                Assert.That(cameraObject.transform.position, Is.EqualTo(home), "C/reset restores the initial position");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(cameraObject); }
+        }
+
+        [Test]
+        public void DesktopMiddleDragPansInCameraPlaneOnlyIn3D()
+        {
+            var cameraObject = new GameObject("Desktop pan camera", typeof(Camera));
+            try
+            {
+                var controls = DesktopFlyCamera.Configure(cameraObject.GetComponent<Camera>());
+                controls.middleDragPanMetresPerPixel = .02f;
+                controls.SetTwoDimensional(false);
+                cameraObject.transform.rotation = Quaternion.Euler(0, 90, 0);
+                Vector3 home = cameraObject.transform.position;
+
+                controls.ApplyMiddleDragPan(new Vector2(10, 5));
+                Vector3 expected = home + cameraObject.transform.right * .2f + cameraObject.transform.up * .1f;
+                Assert.That(Vector3.Distance(cameraObject.transform.position, expected), Is.LessThan(1e-5));
+
+                controls.SetTwoDimensional(true);
+                Vector3 position2D = cameraObject.transform.position;
+                controls.ApplyMiddleDragPan(new Vector2(10, 5));
+                Assert.That(cameraObject.transform.position, Is.EqualTo(position2D), "2D must ignore middle-drag panning");
             }
             finally { UnityEngine.Object.DestroyImmediate(cameraObject); }
         }

@@ -187,21 +187,26 @@ MonoBehaviour:
     count: 1000
     dimension2D: 1
     rule: 0
-    metricRadius: 2
+    metricRadius: 0.8
     topologicalK: 2
     topologicalRadiusCap: 1000
-    speed: 3
+    speed: 2
     noise: 0
     width: 20
     height: 20
     depth: 20
     startDepth: 50
+    volumeShape: 1
+    sphereRadius: 10
+    boundaryBuffer: 1
+    boundaryMode: 1
     wrapX: 1
     wrapY: 1
     wrapZ: 1
   presentationMode: 0
   viewer: {fileID: 1361554057}
   alignToFirstValidHeadPose: 1
+  threeDExtensionSerializationVersion: 1
   randomizeSeed: 1
   seed: 12345
   paused: 0
@@ -240,6 +245,9 @@ MonoBehaviour:
   mirrorMatlabX: 1
   fillDesktop2DViewport: 1
   centreDesktop3DOnViewer: 1
+  viewerPlacement: 1
+  outsideClearance: 20
+  threeDPlacementSerializationVersion: 1
   useAperture: 0
   frameDistance: 0.715
   frameOuterWidth: 0.587
@@ -375,9 +383,9 @@ Camera:
     height: 1
   near clip plane: 0.01
   far clip plane: 140
-  field of view: 25.855934
+  field of view: 22.757584
   orthographic: 0
-  orthographic size: 0.1641242
+  orthographic size: 0.14389388
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
@@ -409,6 +417,8 @@ MonoBehaviour:
   mouseSensitivity: 0.12
   keyboardRotationSpeed: 60
   maximumPitch: 89
+  scrollZoomMetresPerNotch: 1
+  middleDragPanMetresPerPixel: 0.01
   displayWidthMetres: 0.587
   viewingDistanceMetres: 0.715
   referenceWidthPixels: 800

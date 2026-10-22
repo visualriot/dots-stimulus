@@ -46,8 +46,15 @@ namespace DotsStimulus.Editor
             using (new EditorGUI.DisabledScope(vr))
             {
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("fillDesktop2DViewport"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("centreDesktop3DOnViewer"));
             }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("3D viewer placement", EditorStyles.boldLabel);
+            SerializedProperty viewerPlacement = serializedObject.FindProperty("viewerPlacement");
+            EditorGUILayout.PropertyField(viewerPlacement);
+            using (new EditorGUI.DisabledScope(viewerPlacement.enumValueIndex != (int)ViewerPlacement.Outside))
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("outsideClearance"));
+            EditorGUILayout.HelpBox("Shared by desktop 3D and immersive VR 3D. Outside Clearance is measured from the viewer to the nearest volume surface. Neither setting affects either 2D presentation.", MessageType.None);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("MATLAB aperture", EditorStyles.boldLabel);
@@ -59,7 +66,6 @@ namespace DotsStimulus.Editor
             SerializedProperty immersiveAperture = serializedObject.FindProperty("useApertureInImmersive3D");
             using (new EditorGUI.DisabledScope(!vr))
             {
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("centreVrVolumeOnViewer"));
                 EditorGUILayout.PropertyField(immersiveAperture);
             }
 

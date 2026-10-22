@@ -21,6 +21,7 @@ namespace DotsStimulus
         public Camera viewer;
         [Tooltip("VR only. Wait for a valid tracked head pose, align the stimulus to it once, then leave the stimulus world-fixed. C performs a manual realignment.")]
         public bool alignToFirstValidHeadPose = true;
+        [SerializeField, HideInInspector] private int threeDExtensionSerializationVersion = 1;
 
         [Header("Randomization")]
         [Tooltip("On: choose a new seed whenever Play starts, matching MATLAB rng('shuffle'). Off: use Seed below for repeatable Unity runs.")]
@@ -51,6 +52,7 @@ namespace DotsStimulus
 
         private void Start()
         {
+            MigrateThreeDExtensionSettings();
             if (!viewer) viewer = Camera.main;
             display = GetComponent<DotFieldRenderer>();
             if (!viewer)
@@ -206,10 +208,22 @@ namespace DotsStimulus
 
         private void OnValidate()
         {
+            MigrateThreeDExtensionSettings();
             if (metricRadiusPresets == null || metricRadiusPresets.Length == 0) metricRadiusPresets = new[] { 2.0 };
             if (topologicalKPresets == null || topologicalKPresets.Length == 0) topologicalKPresets = new[] { 2 };
             for (int i = 0; i < metricRadiusPresets.Length; i++) metricRadiusPresets[i] = Math.Max(0, metricRadiusPresets[i]);
             for (int i = 0; i < topologicalKPresets.Length; i++) topologicalKPresets[i] = Math.Max(1, topologicalKPresets[i]);
+        }
+
+        private void MigrateThreeDExtensionSettings()
+        {
+            if (threeDExtensionSerializationVersion >= 1) return;
+            if (settings == null) settings = new SwarmSettings();
+            settings.volumeShape = VolumeShape.Box;
+            settings.sphereRadius = 10;
+            settings.boundaryBuffer = 1;
+            settings.boundaryMode = BoundaryMode.MagneticSteering;
+            threeDExtensionSerializationVersion = 1;
         }
 
         private static void Quit()
