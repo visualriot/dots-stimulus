@@ -4,6 +4,8 @@ using UnityEngine.Serialization;
 
 namespace DotsStimulus
 {
+    public enum ViewerPlacement { Centre, Outside }
+
     [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
     public sealed class DotFieldRenderer : MonoBehaviour
     {
@@ -28,8 +30,14 @@ namespace DotsStimulus
         [Header("Desktop presentation")]
         [Tooltip("Desktop only. Scale the 2D plane onto the complete Game-view viewport, like a 2D application. This affects display only; the simulation remains a 20x20 m plane by default.")]
         public bool fillDesktop2DViewport = true;
-        [Tooltip("Desktop 3D only. Display the unchanged MATLAB volume around the camera so right-mouse/IJKL rotation previews the immersive VR view. Turn off for the literal source volume at z=50-70 m.")]
-        public bool centreDesktop3DOnViewer = true;
+        [HideInInspector] public bool centreDesktop3DOnViewer = true;
+
+        [Header("3D viewer placement")]
+        [Tooltip("3D only. Centre places the viewer at the volume centre. Outside places the volume straight ahead of the viewer.")]
+        public ViewerPlacement viewerPlacement = ViewerPlacement.Centre;
+        [Tooltip("3D Outside mode only. Empty distance in metres from the viewer to the nearest box face or sphere surface.")]
+        [Min(0f)] public float outsideClearance = 10f;
+        [SerializeField, HideInInspector] private int threeDPlacementSerializationVersion = 1;
 
         [Header("MATLAB desktop aperture")]
         [Tooltip("MATLAB use_aperture: show or hide the dark-grey window frame that masks the box edges. A toggles it at runtime. Desktop full-viewport 2D starts with it off.")]
@@ -43,8 +51,7 @@ namespace DotsStimulus
         [Min(.01f)] public float frameOuterHeight = .44025f;
 
         [Header("VR immersive 3D")]
-        [Tooltip("VR 3D only. Translate the displayed z=50-70 m source volume to -10 to +10 m around the initial head pose. This is a rigid rendering translation: simulation positions, distances, wrapping and speed are unchanged.")]
-        public bool centreVrVolumeOnViewer = true;
+        [HideInInspector] public bool centreVrVolumeOnViewer = true;
         [Tooltip("Show the MATLAB monitor-style aperture while dots surround the viewer. Normally off because it blocks immersion; it does not change the swarm simulation.")]
         public bool useApertureInImmersive3D;
 
@@ -68,6 +75,8 @@ namespace DotsStimulus
         private Camera presentationCamera;
 
         public void SetPresentationCamera(Camera camera) => presentationCamera = camera;
+
+        private void Awake() => MigrateThreeDPlacement();
 
         public void Initialize(SwarmSimulation simulation)
         {
@@ -154,10 +163,7 @@ namespace DotsStimulus
                     return new Vector3(displayX, displayY, geometry.distance);
                 }
 
-                float desktopZ = (float)position.z;
-                if (!settings.dimension2D && centreDesktop3DOnViewer)
-                    desktopZ -= (float)(settings.startDepth + settings.depth * .5);
-                return new Vector3(x, y, desktopZ);
+                return MapThreeDimensionalPosition(x, y, position, settings);
             }
 
             if (settings.dimension2D)
@@ -167,17 +173,28 @@ namespace DotsStimulus
                 return new Vector3(displayX, displayY, vr2DDisplayDistance);
             }
 
-            float z = (float)position.z;
-            if (centreVrVolumeOnViewer) z -= (float)(settings.startDepth + settings.depth * .5);
-            return new Vector3(x, y, z);
+            return MapThreeDimensionalPosition(x, y, position, settings);
+        }
+
+        private Vector3 MapThreeDimensionalPosition(float x, float y, DVector3 position, SwarmSettings settings)
+        {
+            double centreZ = settings.volumeShape == VolumeShape.Sphere
+                ? settings.startDepth + settings.sphereRadius
+                : settings.startDepth + settings.depth * .5;
+            double z = position.z - centreZ;
+            if (viewerPlacement == ViewerPlacement.Outside)
+            {
+                double forwardExtent = settings.volumeShape == VolumeShape.Sphere
+                    ? settings.sphereRadius
+                    : settings.depth * .5;
+                z += forwardExtent + outsideClearance;
+            }
+            return new Vector3(x, y, (float)z);
         }
 
         private bool IsImmersive3D(SwarmSettings settings)
         {
-            if (settings.dimension2D) return false;
-            return presentationMode == StimulusPresentationMode.VirtualReality
-                ? centreVrVolumeOnViewer
-                : centreDesktop3DOnViewer;
+            return !settings.dimension2D;
         }
 
         private (float width, float height, float distance) DesktopDisplayGeometry()
@@ -238,6 +255,7 @@ namespace DotsStimulus
 
         private void OnValidate()
         {
+            MigrateThreeDPlacement();
             frameDistance = Mathf.Max(.01f, frameDistance);
             frameOuterWidth = Mathf.Max(.01f, frameOuterWidth);
             frameOuterHeight = Mathf.Max(.01f, frameOuterHeight);
@@ -245,7 +263,15 @@ namespace DotsStimulus
             vr2DDisplayHeight = Mathf.Max(.05f, vr2DDisplayHeight);
             vr2DDisplayDistance = Mathf.Max(.05f, vr2DDisplayDistance);
             vr2DFrameBorder = Mathf.Max(0, vr2DFrameBorder);
+            outsideClearance = Mathf.Max(0, outsideClearance);
             BuildFrame();
+        }
+        private void MigrateThreeDPlacement()
+        {
+            if (threeDPlacementSerializationVersion >= 1) return;
+            viewerPlacement = ViewerPlacement.Centre;
+            outsideClearance = 10f;
+            threeDPlacementSerializationVersion = 1;
         }
         private void OnDisable()
         {

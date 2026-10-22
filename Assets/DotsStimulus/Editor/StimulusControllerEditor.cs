@@ -26,13 +26,25 @@ namespace DotsStimulus.Editor
             }
             Draw(settings, "speed", "Speed (m/s)", "MATLAB v: constant movement speed. Neighbour vectors change direction only; the result is normalized back to this speed. Source default: 3 m/s.");
             Draw(settings, "noise", "Directional Noise (vector amplitude)", "MATLAB eta: random vector-component amplitude, NOT an angle in radians. Applied in X/Y for 2D and X/Y/Z for 3D, then normalized. 0 disables noise.");
-            Draw(settings, "width", "Width X (m)", "MATLAB L_x: total X size. Positions span -Width/2 to +Width/2. Source default: 20 m.");
-            Draw(settings, "height", "Height Y (m)", "MATLAB L_y: total Y size. Positions span -Height/2 to +Height/2. Source default: 20 m.");
-            Draw(settings, "depth", "Depth Z (m)", "MATLAB L_z: depth of the 3D region. Source default: 20 m. In 2D, Z remains fixed at Start Depth.");
-            Draw(settings, "startDepth", "Start Depth Z (m)", "MATLAB z_start: near Z coordinate of the swarm. Source default: 50 m, so a 20 m 3D depth spans z=50 to 70 m. Centred immersive presentation translates this visually but does not change the simulation coordinates.");
-            Draw(settings, "wrapX", "Wrap X", "MATLAB torus_x: crossing one X boundary makes the dot reappear at the opposite boundary without changing direction.");
-            Draw(settings, "wrapY", "Wrap Y", "MATLAB torus_y: crossing one Y boundary makes the dot reappear at the opposite boundary without changing direction.");
-            Draw(settings, "wrapZ", "Wrap Z (3D)", "MATLAB torus_z: wrap z between Start Depth and Start Depth + Depth. The current player default is on; the MATLAB comment says it was off in the experiment, which can let the aligned swarm drift out of view.");
+            Draw(settings, "width", "Width X (m)", "MATLAB L_x. Used by 2D and by the 3D Box shape. Positions span -Width/2 to +Width/2. Source default: 20 m.");
+            Draw(settings, "height", "Height Y (m)", "MATLAB L_y. Used by 2D and by the 3D Box shape. Positions span -Height/2 to +Height/2. Source default: 20 m.");
+            Draw(settings, "wrapX", "Wrap X (2D)", "MATLAB torus_x. Retained unchanged for 2D; 3D uses the magnetic boundary instead of wrapping.");
+            Draw(settings, "wrapY", "Wrap Y (2D)", "MATLAB torus_y. Retained unchanged for 2D; 3D uses the magnetic boundary instead of wrapping.");
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("3D Study Extensions", EditorStyles.boldLabel);
+            SerializedProperty volumeShape = settings.FindPropertyRelative("volumeShape");
+            EditorGUILayout.PropertyField(volumeShape, new GUIContent("Volume Shape", "3D only. Choose the original box or a spherical core volume."));
+            bool sphere = volumeShape.enumValueIndex == (int)VolumeShape.Sphere;
+            using (new EditorGUI.DisabledScope(sphere))
+                Draw(settings, "depth", "Box Depth Z (m)", "3D Box only. MATLAB L_z; source default 20 m.");
+            using (new EditorGUI.DisabledScope(!sphere))
+                Draw(settings, "sphereRadius", "Sphere Radius (m)", "3D Sphere only. Core radius before the magnetic buffer; default 10 m.");
+            Draw(settings, "startDepth", "Start Depth Z (m)", "Near Z edge of either 3D shape and the fixed Z plane in 2D. With the defaults, both shapes span z=50 to 70 m.");
+            Draw(settings, "boundaryBuffer", "Boundary Buffer (m)", "3D only. Thickness outside the core where the selected buffer behaviour is applied. Default 1 m.");
+            Draw(settings, "boundaryMode", "Buffer Behaviour", "3D only. Magnetic Steering curves progressively inward. Smooth Linear Bounce follows the incoming line to the outer limit, slows smoothly, and returns on that exact line before MATLAB steering resumes.");
+            using (new EditorGUI.DisabledScope(true))
+                Draw(settings, "wrapZ", "Legacy Wrap Z (inactive)", "Serialized for compatibility only. All 3D shapes now use the magnetic boundary and never wrap.");
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Presentation", EditorStyles.boldLabel);
@@ -72,15 +84,21 @@ namespace DotsStimulus.Editor
                 EditorUtility.SetDirty(dotRenderer);
             }
             double area = Math.Max(double.Epsilon, controller.settings.width * controller.settings.height);
-            double volume = Math.Max(double.Epsilon, area * controller.settings.depth);
-            EditorGUILayout.HelpBox($"Derived density: {controller.settings.count / area:F3} dots/m^2 in 2D; {controller.settings.count / volume:F3} dots/m^3 in 3D. Edit Dot Count or the simulation dimensions to change it.", MessageType.None);
+            double volume = controller.settings.volumeShape == VolumeShape.Sphere
+                ? 4.0 / 3.0 * Math.PI * Math.Pow(controller.settings.sphereRadius, 3)
+                : area * controller.settings.depth;
+            volume = Math.Max(double.Epsilon, volume);
+            string outer = controller.settings.volumeShape == VolumeShape.Sphere
+                ? $"sphere core radius {controller.settings.sphereRadius:F3} m; outer radius {controller.settings.sphereRadius + controller.settings.boundaryBuffer:F3} m"
+                : $"box core {controller.settings.width:F3} x {controller.settings.height:F3} x {controller.settings.depth:F3} m; outer {controller.settings.width + 2 * controller.settings.boundaryBuffer:F3} x {controller.settings.height + 2 * controller.settings.boundaryBuffer:F3} x {controller.settings.depth + 2 * controller.settings.boundaryBuffer:F3} m";
+            EditorGUILayout.HelpBox($"Derived density: {controller.settings.count / area:F3} dots/m^2 in 2D; {controller.settings.count / volume:F3} dots/m^3 in the 3D core. Selected volume: {outer}.", MessageType.None);
             try { controller.settings.Validate(); }
             catch (Exception exception) { EditorGUILayout.HelpBox(exception.Message, MessageType.Error); }
             if (Application.isPlaying && controller.Simulation != null)
                 EditorGUILayout.HelpBox($"Step {controller.Simulation.StepCount}; last simulation delta {controller.LastStepDeltaSeconds:F6} s", MessageType.None);
 
             if (controller.presentationMode == StimulusPresentationMode.Desktop)
-                EditorGUILayout.HelpBox("Desktop: 2D is a fixed orthographic full-viewport view with no mouse response. D restarts in immersive perspective 3D, where right-mouse drag or I/J/K/L rotates the simulated head. C resets the view.", MessageType.Info);
+                EditorGUILayout.HelpBox("Desktop: 2D is a fixed orthographic full-viewport view with no mouse response. D restarts in immersive perspective 3D, where right-mouse drag or I/J/K/L rotates the simulated head and the mouse wheel moves it forward/back. C resets position and rotation.", MessageType.Info);
             else
                 EditorGUILayout.HelpBox("VR: 3D surrounds the initially aligned tracked head. D restarts in 2D on a virtual screen in front of the current head pose. C realigns the presentation without resetting the swarm.", MessageType.Info);
 

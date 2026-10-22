@@ -477,12 +477,17 @@ MonoBehaviour:
     height: 20
     depth: 20
     startDepth: 50
+    volumeShape: 1
+    sphereRadius: 10
+    boundaryBuffer: 1
+    boundaryMode: 1
     wrapX: 1
     wrapY: 1
     wrapZ: 1
   presentationMode: 1
   viewer: {fileID: 235598937}
   alignToFirstValidHeadPose: 1
+  threeDExtensionSerializationVersion: 1
   randomizeSeed: 1
   seed: 12345
   paused: 0
@@ -521,6 +526,9 @@ MonoBehaviour:
   mirrorMatlabX: 1
   fillDesktop2DViewport: 1
   centreDesktop3DOnViewer: 1
+  viewerPlacement: 0
+  outsideClearance: 10
+  threeDPlacementSerializationVersion: 1
   useAperture: 1
   frameDistance: 0.715
   frameOuterWidth: 10
