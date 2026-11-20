@@ -11,30 +11,30 @@ namespace DotsStimulus
     public sealed class StimulusController : MonoBehaviour
     {
         [Header("MATLAB simulation (metres and seconds)")]
-        [Tooltip("Copied into the active simulation when Play begins. Runtime controls keep applicable values synchronized.")]
+        [Tooltip("Dot movement, neighbour, shape, and boundary settings. These values are copied into the simulation when Play begins.")]
         public SwarmSettings settings = new SwarmSettings();
 
         [Header("Presentation")]
-        [Tooltip("Selects the presentation rig only. Desktop uses a fixed orthographic 2D view or mouse-look 3D preview; Virtual Reality uses the tracked OpenXR headset. The swarm algorithm is identical.")]
+        [Tooltip("Choose Desktop for a screen and mouse view, or Virtual Reality for a tracked headset. Dot movement is the same in both.")]
         public StimulusPresentationMode presentationMode = StimulusPresentationMode.Desktop;
-        [Tooltip("Camera used to display the stimulus. Assigned automatically by the scene creator: the desktop camera or the tracked XR headset camera.")]
+        [Tooltip("Camera through which the participant sees the dots. The scene-creation menu assigns this automatically.")]
         public Camera viewer;
-        [Tooltip("VR only. Wait for a valid tracked head pose, align the stimulus to it once, then leave the stimulus world-fixed. C performs a manual realignment.")]
+        [Tooltip("VR only. Align the stimulus to the first tracked headset pose, then leave it fixed in the room. Press C to align it again.")]
         public bool alignToFirstValidHeadPose = true;
-        [SerializeField, HideInInspector] private int threeDExtensionSerializationVersion = 1;
+        [SerializeField, HideInInspector] private int threeDExtensionSerializationVersion = 2;
 
         [Header("Randomization")]
-        [Tooltip("On: choose a new seed whenever Play starts, matching MATLAB rng('shuffle'). Off: use Seed below for repeatable Unity runs.")]
+        [Tooltip("On gives a different run each time Play starts. Off uses the Seed below for a repeatable Unity run.")]
         public bool randomizeSeed = true;
-        [Tooltip("Seed used only when Randomize Seed is off. The same Unity seed repeats a Unity run, but MATLAB uses a different random-number generator.")]
+        [Tooltip("Number used to repeat the same Unity run when Randomize Seed is off.")]
         public int seed = 12345;
-        [Tooltip("Start the simulation paused. Space toggles pause without regenerating the dots.")]
+        [Tooltip("Start with movement paused. Press Space to pause or continue without regenerating the dots.")]
         public bool paused;
 
         [Header("Arrow-key presets")]
-        [Tooltip("MATLAB possible_radius values stepped through by Up/Down when Neighbour Rule is Metric. Values are interaction radii in metres.")]
+        [Tooltip("Metric Radius values selected by the Up and Down keys. Values are in metres.")]
         public double[] metricRadiusPresets = { 0, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 1000 };
-        [Tooltip("MATLAB possible_num_n values stepped through by Up/Down when Neighbour Rule is Topological. K includes the dot itself; ties can include more than K dots.")]
+        [Tooltip("Topological K values selected by the Up and Down keys. K includes the dot itself.")]
         public int[] topologicalKPresets = { 2, 3, 5, 9, 17, 33 };
 
         public SwarmSimulation Simulation { get; private set; }
@@ -73,7 +73,7 @@ namespace DotsStimulus
             previousTime = Time.realtimeSinceStartupAsDouble;
             Emit("started", $"seed={actualSeed};mode={presentationMode};dimension={(settings.dimension2D ? "2D" : "3D")}");
             Debug.Log($"Dots stimulus: seed={actualSeed}, N={settings.count}, rule={settings.rule}, dimension={(settings.dimension2D ? "2D" : "3D")}. " +
-                "D 2D/3D; A aperture; R restart; arrows parameter; Space pause; C reset/realign view; Escape stop.");
+                "D 2D/3D; P viewer placement; A aperture; R restart; arrows parameter; Space pause; C reset/realign view; Escape stop.");
         }
 
         private void Update()
@@ -107,6 +107,7 @@ namespace DotsStimulus
                     display.useAperture = !display.useAperture;
                     Emit("aperture", display.useAperture ? "enabled" : "disabled");
                 }
+                else if (keyboard.pKey.wasPressedThisFrame) ToggleViewerPlacement();
                 else if (keyboard.upArrowKey.wasPressedThisFrame) { ChangeParameter(1); Restart("parameter", "up"); }
                 else if (keyboard.downArrowKey.wasPressedThisFrame) { ChangeParameter(-1); Restart("parameter", "down"); }
 
@@ -151,6 +152,22 @@ namespace DotsStimulus
             transform.SetPositionAndRotation(viewer.transform.position, viewer.transform.rotation);
             HasAlignedToHeadPose = true;
             Emit("vr_stimulus_aligned", "manual");
+        }
+
+        public void ToggleViewerPlacement()
+        {
+            if (Simulation != null && Simulation.Settings.dimension2D) return;
+            DotFieldRenderer targetDisplay = display ? display : GetComponent<DotFieldRenderer>();
+            if (!targetDisplay) return;
+            if (viewer)
+            {
+                transform.SetPositionAndRotation(viewer.transform.position, viewer.transform.rotation);
+                if (presentationMode == StimulusPresentationMode.VirtualReality) HasAlignedToHeadPose = true;
+            }
+            targetDisplay.viewerPlacement = targetDisplay.viewerPlacement == ViewerPlacement.Centre
+                ? ViewerPlacement.Outside
+                : ViewerPlacement.Centre;
+            Emit("viewer_placement", targetDisplay.viewerPlacement == ViewerPlacement.Centre ? "centre" : "outside");
         }
 
         private void TryAlignToTrackedHead()
@@ -217,13 +234,22 @@ namespace DotsStimulus
 
         private void MigrateThreeDExtensionSettings()
         {
-            if (threeDExtensionSerializationVersion >= 1) return;
             if (settings == null) settings = new SwarmSettings();
-            settings.volumeShape = VolumeShape.Box;
-            settings.sphereRadius = 10;
-            settings.boundaryBuffer = 1;
-            settings.boundaryMode = BoundaryMode.MagneticSteering;
-            threeDExtensionSerializationVersion = 1;
+            if (threeDExtensionSerializationVersion < 1)
+            {
+                settings.volumeShape = VolumeShape.Box;
+                settings.sphereRadius = 10;
+                settings.boundaryBuffer = 1;
+                settings.boundaryMode = BoundaryMode.MagneticSteering;
+            }
+            if (threeDExtensionSerializationVersion < 2)
+            {
+                settings.fadeBuffer = 2;
+                settings.fadeLifetimeMin = 1;
+                settings.fadeLifetimeMax = 2;
+                settings.fadeRespawnMode = FadeRespawnMode.Centre;
+            }
+            threeDExtensionSerializationVersion = 2;
         }
 
         private static void Quit()

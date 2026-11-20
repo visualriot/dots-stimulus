@@ -21,7 +21,7 @@ namespace DotsStimulus.Editor
             EditorGUILayout.LabelField("Presentation", EditorStyles.boldLabel);
             EditorGUI.BeginChangeCheck();
             using (new EditorGUI.DisabledScope(Application.isPlaying))
-                EditorGUILayout.PropertyField(presentation, new GUIContent("Presentation Mode", "Desktop or VR presentation. This value is synchronized with Stimulus Controller."));
+                EditorGUILayout.PropertyField(presentation, new GUIContent("Presentation Mode", "Choose Desktop screen viewing or a tracked VR headset. This stays in sync with Stimulus Controller."));
             bool presentationChanged = EditorGUI.EndChangeCheck();
 
             StimulusPresentationMode mode = (StimulusPresentationMode)presentation.enumValueIndex;
@@ -32,6 +32,10 @@ namespace DotsStimulus.Editor
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Dots (shared)", EditorStyles.boldLabel);
+            SerializedProperty worldSize = serializedObject.FindProperty("useWorldSizeIn3D");
+            EditorGUILayout.PropertyField(worldSize);
+            using (new EditorGUI.DisabledScope(!worldSize.boolValue))
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("diameterMetres"));
             SerializedProperty angular = serializedObject.FindProperty("useAngularSize");
             EditorGUILayout.PropertyField(angular);
             using (new EditorGUI.DisabledScope(angular.boolValue))
@@ -39,7 +43,7 @@ namespace DotsStimulus.Editor
             using (new EditorGUI.DisabledScope(!angular.boolValue))
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("diameterDegrees"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("mirrorMatlabX"));
-            EditorGUILayout.HelpBox("Angular size changes dot diameter only. It never changes dot count, spatial density, neighbours, or movement.", MessageType.None);
+            EditorGUILayout.HelpBox("In 3D, World Size gives natural perspective: distant dots look smaller. Pixel/Angular size is used in 2D and is also the 3D fallback when World Size is off. Dot size never changes movement or neighbours.", MessageType.None);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Desktop presentation", EditorStyles.boldLabel);
@@ -54,7 +58,7 @@ namespace DotsStimulus.Editor
             EditorGUILayout.PropertyField(viewerPlacement);
             using (new EditorGUI.DisabledScope(viewerPlacement.enumValueIndex != (int)ViewerPlacement.Outside))
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("outsideClearance"));
-            EditorGUILayout.HelpBox("Shared by desktop 3D and immersive VR 3D. Outside Clearance is measured from the viewer to the nearest volume surface. Neither setting affects either 2D presentation.", MessageType.None);
+            EditorGUILayout.HelpBox("Used in Desktop and VR 3D. P places the stimulus from the viewer's current position and facing direction, then switches Centre/Outside without restarting the dots. Placement does not affect 2D.", MessageType.None);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("MATLAB aperture", EditorStyles.boldLabel);
@@ -77,7 +81,7 @@ namespace DotsStimulus.Editor
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("frameOuterHeight"));
             }
             if (vr)
-                EditorGUILayout.HelpBox("Frame Distance/Outer Width/Outer Height are normally desktop-only. In VR they become relevant only if both Use Aperture and Use Aperture In Immersive 3D are enabled.", MessageType.None);
+                EditorGUILayout.HelpBox("These aperture measurements normally affect Desktop only. In VR 3D they are used only when both aperture options are on.", MessageType.None);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("VR 2D display", EditorStyles.boldLabel);
@@ -118,6 +122,8 @@ namespace DotsStimulus.Editor
                 controller.presentationMode = mode;
                 EditorUtility.SetDirty(controller);
             }
+
+            StimulusHelpText.DrawQuickControls(vr);
         }
     }
 }

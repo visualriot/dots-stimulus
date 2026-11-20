@@ -480,14 +480,18 @@ MonoBehaviour:
     volumeShape: 1
     sphereRadius: 10
     boundaryBuffer: 1
-    boundaryMode: 1
+    boundaryMode: 2
+    fadeBuffer: 2
+    fadeLifetimeMin: 1
+    fadeLifetimeMax: 2
+    fadeRespawnMode: 0
     wrapX: 1
     wrapY: 1
     wrapZ: 1
   presentationMode: 1
   viewer: {fileID: 235598937}
   alignToFirstValidHeadPose: 1
-  threeDExtensionSerializationVersion: 1
+  threeDExtensionSerializationVersion: 2
   randomizeSeed: 1
   seed: 12345
   paused: 0

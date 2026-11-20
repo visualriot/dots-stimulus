@@ -11,40 +11,52 @@ namespace DotsStimulus.Editor
         {
             serializedObject.Update();
             SerializedProperty settings = serializedObject.FindProperty("settings");
-            EditorGUILayout.LabelField("MATLAB Simulation", EditorStyles.boldLabel);
-            Draw(settings, "count", "Dot Count / Density", "MATLAB N: total number of simulated dots. Source default: 1000. Density also depends on Width, Height and, in 3D, Depth.");
-            Draw(settings, "dimension2D", "Two Dimensional", "MATLAB Dimension_2D. On: every dot stays in the plane at Start Depth and moves only in X/Y. Off: positions and directions use the full 3D volume.");
+            EditorGUILayout.LabelField("Dot Simulation", EditorStyles.boldLabel);
+            Draw(settings, "count", "Dot Count / Density", "Number of active dots. More dots increase density and processing cost. Default: 1000.");
+            Draw(settings, "dimension2D", "Two Dimensional", "On: dots move on one flat X/Y plane. Off: dots move through the selected 3D box or sphere.");
             SerializedProperty rule = settings.FindPropertyRelative("rule");
-            EditorGUILayout.PropertyField(rule, new GUIContent("Neighbour Rule", "MATLAB algo_type. Metric selects every dot inside radius r. Topological selects the nearest K entries, including the dot itself."));
+            EditorGUILayout.PropertyField(rule, new GUIContent("Neighbour Rule", "Metric follows dots within a distance. Topological follows the nearest K dots."));
             bool topological = rule.enumValueIndex == (int)NeighbourRule.Topological;
             using (new EditorGUI.DisabledScope(topological))
-                Draw(settings, "metricRadius", "Metric Radius (m)", "MATLAB sim_param in metric mode: every dot at Euclidean distance <= this radius is a neighbour. Self is included. Source default: 2 m.");
+                Draw(settings, "metricRadius", "Metric Radius (m)", "Metric mode only. Each dot follows dots within this distance. Default: 2 m.");
             using (new EditorGUI.DisabledScope(!topological))
             {
-                Draw(settings, "topologicalK", "Topological K", "MATLAB sim_param in topological mode. K includes the dot itself, so K=2 normally means self plus the nearest other dot. All ties at the Kth distance are included.");
-                Draw(settings, "topologicalRadiusCap", "Topological Radius Cap (m)", "MATLAB int_r_topo: additional maximum distance for topological neighbours. Source default 1000 m effectively covers the whole room.");
+                Draw(settings, "topologicalK", "Topological K", "Topological mode only. Number of nearest dots to follow, including the dot itself. K=2 normally means itself plus one other dot.");
+                Draw(settings, "topologicalRadiusCap", "Topological Radius Cap (m)", "Topological mode only. Ignore selected neighbours farther away than this. Default 1000 m is effectively unlimited.");
             }
-            Draw(settings, "speed", "Speed (m/s)", "MATLAB v: constant movement speed. Neighbour vectors change direction only; the result is normalized back to this speed. Source default: 3 m/s.");
-            Draw(settings, "noise", "Directional Noise (vector amplitude)", "MATLAB eta: random vector-component amplitude, NOT an angle in radians. Applied in X/Y for 2D and X/Y/Z for 3D, then normalized. 0 disables noise.");
-            Draw(settings, "width", "Width X (m)", "MATLAB L_x. Used by 2D and by the 3D Box shape. Positions span -Width/2 to +Width/2. Source default: 20 m.");
-            Draw(settings, "height", "Height Y (m)", "MATLAB L_y. Used by 2D and by the 3D Box shape. Positions span -Height/2 to +Height/2. Source default: 20 m.");
-            Draw(settings, "wrapX", "Wrap X (2D)", "MATLAB torus_x. Retained unchanged for 2D; 3D uses the magnetic boundary instead of wrapping.");
-            Draw(settings, "wrapY", "Wrap Y (2D)", "MATLAB torus_y. Retained unchanged for 2D; 3D uses the magnetic boundary instead of wrapping.");
+            Draw(settings, "speed", "Speed (m/s)", "Movement speed of every active dot. Default: 3 metres per second.");
+            Draw(settings, "noise", "Directional Noise", "Adds random variation to movement direction. Zero turns noise off. Larger values produce less regular movement.");
+            Draw(settings, "width", "Width X (m)", "Horizontal size of the 2D plane or 3D box, in metres. Default: 20 m.");
+            Draw(settings, "height", "Height Y (m)", "Vertical size of the 2D plane or 3D box, in metres. Default: 20 m.");
+            Draw(settings, "wrapX", "Wrap X (2D)", "2D only. A dot leaving the left or right edge returns at the opposite edge.");
+            Draw(settings, "wrapY", "Wrap Y (2D)", "2D only. A dot leaving the top or bottom edge returns at the opposite edge.");
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("3D Study Extensions", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("3D Shape and Boundary", EditorStyles.boldLabel);
             SerializedProperty volumeShape = settings.FindPropertyRelative("volumeShape");
-            EditorGUILayout.PropertyField(volumeShape, new GUIContent("Volume Shape", "3D only. Choose the original box or a spherical core volume."));
+            EditorGUILayout.PropertyField(volumeShape, new GUIContent("Volume Shape", "3D only. Choose a box or sphere for the active dot area."));
             bool sphere = volumeShape.enumValueIndex == (int)VolumeShape.Sphere;
             using (new EditorGUI.DisabledScope(sphere))
-                Draw(settings, "depth", "Box Depth Z (m)", "3D Box only. MATLAB L_z; source default 20 m.");
+                Draw(settings, "depth", "Box Depth Z (m)", "3D Box only. Front-to-back size of the box. Default: 20 m.");
             using (new EditorGUI.DisabledScope(!sphere))
-                Draw(settings, "sphereRadius", "Sphere Radius (m)", "3D Sphere only. Core radius before the magnetic buffer; default 10 m.");
-            Draw(settings, "startDepth", "Start Depth Z (m)", "Near Z edge of either 3D shape and the fixed Z plane in 2D. With the defaults, both shapes span z=50 to 70 m.");
-            Draw(settings, "boundaryBuffer", "Boundary Buffer (m)", "3D only. Thickness outside the core where the selected buffer behaviour is applied. Default 1 m.");
-            Draw(settings, "boundaryMode", "Buffer Behaviour", "3D only. Magnetic Steering curves progressively inward. Smooth Linear Bounce follows the incoming line to the outer limit, slows smoothly, and returns on that exact line before MATLAB steering resumes.");
+                Draw(settings, "sphereRadius", "Sphere Radius (m)", "3D Sphere only. Distance from the sphere centre to its active edge. Default: 10 m.");
+            Draw(settings, "startDepth", "Start Depth Z (m)", "Simulation-space position of the 2D plane or nearest 3D edge. Most studies can keep the default of 50 m.");
+            SerializedProperty boundaryMode = settings.FindPropertyRelative("boundaryMode");
+            EditorGUILayout.PropertyField(boundaryMode, new GUIContent("Buffer Behaviour", "3D only. Choose whether dots turn back, bounce back, or fade while a replacement appears inside."));
+            bool fading = boundaryMode.enumValueIndex == (int)BoundaryMode.FadeAndRespawn;
+            if (fading)
+            {
+                Draw(settings, "fadeBuffer", "Fade Buffer (m)", "Space outside the active box or sphere where outgoing copies slow down and fade. Default: 2 m.");
+                Draw(settings, "fadeLifetimeMin", "Minimum Fade Lifetime (s)", "Shortest time an outgoing copy can take to fade. Default: 1 second.");
+                Draw(settings, "fadeLifetimeMax", "Maximum Fade Lifetime (s)", "Longest time an outgoing copy can take to fade. Default: 2 seconds.");
+                Draw(settings, "fadeRespawnMode", "Respawn Location", "Centre puts replacements at the shape centre. Random Within Core spreads them through the active box or sphere.");
+            }
+            else
+            {
+                Draw(settings, "boundaryBuffer", "Boundary Buffer (m)", "Space outside the active shape used for turning or bouncing. Default: 1 m.");
+            }
             using (new EditorGUI.DisabledScope(true))
-                Draw(settings, "wrapZ", "Legacy Wrap Z (inactive)", "Serialized for compatibility only. All 3D shapes now use the magnetic boundary and never wrap.");
+                Draw(settings, "wrapZ", "Legacy Wrap Z (inactive)", "Kept only so older scenes still load correctly. Current 3D modes never wrap in Z.");
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Presentation", EditorStyles.boldLabel);
@@ -88,22 +100,25 @@ namespace DotsStimulus.Editor
                 ? 4.0 / 3.0 * Math.PI * Math.Pow(controller.settings.sphereRadius, 3)
                 : area * controller.settings.depth;
             volume = Math.Max(double.Epsilon, volume);
+            double selectedBuffer = controller.settings.boundaryMode == BoundaryMode.FadeAndRespawn
+                ? controller.settings.fadeBuffer
+                : controller.settings.boundaryBuffer;
             string outer = controller.settings.volumeShape == VolumeShape.Sphere
-                ? $"sphere core radius {controller.settings.sphereRadius:F3} m; outer radius {controller.settings.sphereRadius + controller.settings.boundaryBuffer:F3} m"
-                : $"box core {controller.settings.width:F3} x {controller.settings.height:F3} x {controller.settings.depth:F3} m; outer {controller.settings.width + 2 * controller.settings.boundaryBuffer:F3} x {controller.settings.height + 2 * controller.settings.boundaryBuffer:F3} x {controller.settings.depth + 2 * controller.settings.boundaryBuffer:F3} m";
+                ? $"sphere core radius {controller.settings.sphereRadius:F3} m; outer radius {controller.settings.sphereRadius + selectedBuffer:F3} m"
+                : $"box core {controller.settings.width:F3} x {controller.settings.height:F3} x {controller.settings.depth:F3} m; outer {controller.settings.width + 2 * selectedBuffer:F3} x {controller.settings.height + 2 * selectedBuffer:F3} x {controller.settings.depth + 2 * selectedBuffer:F3} m";
             EditorGUILayout.HelpBox($"Derived density: {controller.settings.count / area:F3} dots/m^2 in 2D; {controller.settings.count / volume:F3} dots/m^3 in the 3D core. Selected volume: {outer}.", MessageType.None);
             try { controller.settings.Validate(); }
             catch (Exception exception) { EditorGUILayout.HelpBox(exception.Message, MessageType.Error); }
             if (Application.isPlaying && controller.Simulation != null)
-                EditorGUILayout.HelpBox($"Step {controller.Simulation.StepCount}; last simulation delta {controller.LastStepDeltaSeconds:F6} s", MessageType.None);
+                EditorGUILayout.HelpBox($"Step {controller.Simulation.StepCount}; active core dots {controller.Simulation.Positions.Length}; fading dots {controller.Simulation.FadingDots.Count}; last simulation delta {controller.LastStepDeltaSeconds:F6} s", MessageType.None);
 
             if (controller.presentationMode == StimulusPresentationMode.Desktop)
-                EditorGUILayout.HelpBox("Desktop: 2D is a fixed orthographic full-viewport view with no mouse response. D restarts in immersive perspective 3D, where right-mouse drag or I/J/K/L rotates the simulated head and the mouse wheel moves it forward/back. C resets position and rotation.", MessageType.Info);
+                EditorGUILayout.HelpBox("Desktop starts as a fixed 2D view. Press D for a movable 3D preview. The dot movement rules are unchanged.", MessageType.Info);
             else
-                EditorGUILayout.HelpBox("VR: 3D surrounds the initially aligned tracked head. D restarts in 2D on a virtual screen in front of the current head pose. C realigns the presentation without resetting the swarm.", MessageType.Info);
+                EditorGUILayout.HelpBox("VR starts in immersive 3D using the tracked headset. Press D for a flat virtual 2D screen. C realigns without restarting the dots.", MessageType.Info);
 
-            EditorGUILayout.HelpBox("Controls: D = 2D/3D and restart; A = aperture; R = restart; Up/Down = radius or K preset and restart; Space = pause; C = reset/realign view; Escape = stop.", MessageType.None);
-            EditorGUILayout.HelpBox("Inspector values are copied into the MATLAB-faithful simulation when Play begins. Runtime controls keep the applicable displayed values synchronized.", MessageType.Info);
+            EditorGUILayout.HelpBox("Inspector values are copied into the simulation when Play begins. Save the scene after changing study settings.", MessageType.None);
+            StimulusHelpText.DrawQuickControls(vr);
         }
 
         private static void Draw(SerializedProperty root, string child, string label, string tooltip)
