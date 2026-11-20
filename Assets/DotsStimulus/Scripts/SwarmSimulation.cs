@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 
 namespace DotsStimulus
 {
     public enum NeighbourRule { Metric, Topological }
     public enum VolumeShape { Box, Sphere }
-    public enum BoundaryMode { MagneticSteering, SmoothLinearBounce }
+    public enum BoundaryMode { MagneticSteering, SmoothLinearBounce, FadeAndRespawn }
+    public enum FadeRespawnMode { Centre, RandomWithinCore }
 
     [Serializable]
     public sealed class SwarmSettings
@@ -23,6 +25,10 @@ namespace DotsStimulus
         public double sphereRadius = 10;
         public double boundaryBuffer = 1;
         public BoundaryMode boundaryMode = BoundaryMode.MagneticSteering;
+        public double fadeBuffer = 2;
+        public double fadeLifetimeMin = 1;
+        public double fadeLifetimeMax = 2;
+        public FadeRespawnMode fadeRespawnMode = FadeRespawnMode.Centre;
         public bool wrapX = true, wrapY = true, wrapZ = true;
 
         public SwarmSettings Copy() => (SwarmSettings)MemberwiseClone();
@@ -33,9 +39,14 @@ namespace DotsStimulus
             if (topologicalK < 1 || topologicalK > count) throw new ArgumentOutOfRangeException(nameof(topologicalK), "k must be between 1 and count, including self.");
             if (rule != NeighbourRule.Metric && rule != NeighbourRule.Topological) throw new ArgumentOutOfRangeException(nameof(rule));
             if (volumeShape != VolumeShape.Box && volumeShape != VolumeShape.Sphere) throw new ArgumentOutOfRangeException(nameof(volumeShape));
-            if (boundaryMode != BoundaryMode.MagneticSteering && boundaryMode != BoundaryMode.SmoothLinearBounce) throw new ArgumentOutOfRangeException(nameof(boundaryMode));
+            if (boundaryMode != BoundaryMode.MagneticSteering && boundaryMode != BoundaryMode.SmoothLinearBounce &&
+                boundaryMode != BoundaryMode.FadeAndRespawn) throw new ArgumentOutOfRangeException(nameof(boundaryMode));
+            if (fadeRespawnMode != FadeRespawnMode.Centre && fadeRespawnMode != FadeRespawnMode.RandomWithinCore)
+                throw new ArgumentOutOfRangeException(nameof(fadeRespawnMode));
             Positive(width, nameof(width)); Positive(height, nameof(height)); Positive(depth, nameof(depth));
-            Positive(sphereRadius, nameof(sphereRadius)); Positive(boundaryBuffer, nameof(boundaryBuffer));
+            Positive(sphereRadius, nameof(sphereRadius)); Positive(boundaryBuffer, nameof(boundaryBuffer)); Positive(fadeBuffer, nameof(fadeBuffer));
+            Positive(fadeLifetimeMin, nameof(fadeLifetimeMin)); Positive(fadeLifetimeMax, nameof(fadeLifetimeMax));
+            if (fadeLifetimeMax < fadeLifetimeMin) throw new ArgumentOutOfRangeException(nameof(fadeLifetimeMax), "Maximum fade lifetime must be at least the minimum fade lifetime.");
             Positive(startDepth, nameof(startDepth)); Positive(speed, nameof(speed));
             Nonnegative(metricRadius, nameof(metricRadius)); Nonnegative(topologicalRadiusCap, nameof(topologicalRadiusCap));
             Nonnegative(noise, nameof(noise));
@@ -68,11 +79,23 @@ namespace DotsStimulus
     /// <summary>Pure C# port of info/PLS_Stimulus_Base.m. No Unity, physics, or rendering dependencies.</summary>
     public sealed class SwarmSimulation
     {
+        public sealed class FadingDot
+        {
+            public DVector3 Position { get; internal set; }
+            public double Opacity { get; internal set; }
+            public double Lifetime { get; internal set; }
+            public double Elapsed { get; internal set; }
+            internal DVector3 StartPosition;
+            internal DVector3 Direction;
+            internal double TravelDistance;
+        }
+
         // MATLAB eps is machine epsilon at 1, NOT C# double.Epsilon (smallest subnormal).
         public const double MatlabEpsilon = 2.2204460492503131e-16;
         public readonly SwarmSettings Settings;
         public readonly DVector3[] Positions;
         public readonly DVector3[] Velocities;
+        public IReadOnlyList<FadingDot> FadingDots => fadingDots;
         public long StepCount { get; private set; }
         private readonly DVector3[] nextDirections;
         private readonly DVector3[] bounceEntries, bounceDirections;
@@ -80,6 +103,7 @@ namespace DotsStimulus
         private readonly bool[] bounceActive;
         private readonly double[] bounceDistances, bounceElapsed, bounceDurations;
         private readonly double[] distances, sortedDistances;
+        private readonly List<FadingDot> fadingDots = new List<FadingDot>();
         private readonly Random random;
 
         public SwarmSimulation(SwarmSettings settings, int seed)
@@ -106,16 +130,11 @@ namespace DotsStimulus
         public void Reset()
         {
             Array.Clear(bounceActive, 0, bounceActive.Length);
+            fadingDots.Clear();
             for (int i = 0; i < Positions.Length; i++)
             {
-                Positions[i] = !Settings.dimension2D && Settings.volumeShape == VolumeShape.Sphere
-                    ? RandomPointInSphere()
-                    : new DVector3((random.NextDouble() - .5) * Settings.width,
-                        (random.NextDouble() - .5) * Settings.height, Settings.startDepth + random.NextDouble() * Settings.depth);
-                double azimuth = random.NextDouble() * 2 * Math.PI;
-                double cosine = 2 * random.NextDouble() - 1;
-                double sine = Math.Sqrt(1 - cosine * cosine);
-                Velocities[i] = new DVector3(sine * Math.Sin(azimuth), cosine, sine * Math.Cos(azimuth)) * Settings.speed;
+                Positions[i] = RandomPointInCore();
+                Velocities[i] = RandomSpatialDirection() * Settings.speed;
                 if (Settings.dimension2D)
                 {
                     Positions[i].z = Settings.startDepth;
@@ -129,6 +148,7 @@ namespace DotsStimulus
         {
             if (double.IsNaN(deltaSeconds) || double.IsInfinity(deltaSeconds) || deltaSeconds < 0)
                 throw new ArgumentOutOfRangeException(nameof(deltaSeconds));
+            AdvanceFadingDots(deltaSeconds);
             int firstBad = -1;
             for (int i = 0; i < Positions.Length; i++)
             {
@@ -207,6 +227,17 @@ namespace DotsStimulus
                         ConstrainToOuterBoundary(ref position, ref velocity);
                     }
                 }
+                else if (Settings.boundaryMode == BoundaryMode.FadeAndRespawn)
+                {
+                    bounceActive[i] = false;
+                    if (IsOutsideCore(position))
+                    {
+                        BeginFade(Positions[i], velocity, deltaSeconds);
+                        RespawnAfterFade(i);
+                        position = Positions[i];
+                        velocity = Velocities[i];
+                    }
+                }
                 else
                 {
                     bounceActive[i] = false;
@@ -231,6 +262,21 @@ namespace DotsStimulus
             return new DVector3(Math.Cos(phi), Math.Sin(phi), 0);
         }
 
+        private DVector3 RandomSpatialDirection()
+        {
+            double azimuth = random.NextDouble() * 2 * Math.PI;
+            double cosine = 2 * random.NextDouble() - 1;
+            double sine = Math.Sqrt(1 - cosine * cosine);
+            return new DVector3(sine * Math.Sin(azimuth), cosine, sine * Math.Cos(azimuth));
+        }
+
+        private DVector3 RandomPointInCore()
+        {
+            if (!Settings.dimension2D && Settings.volumeShape == VolumeShape.Sphere) return RandomPointInSphere();
+            return new DVector3((random.NextDouble() - .5) * Settings.width,
+                (random.NextDouble() - .5) * Settings.height, Settings.startDepth + random.NextDouble() * Settings.depth);
+        }
+
         private DVector3 RandomPointInSphere()
         {
             double radius = Settings.sphereRadius * Math.Pow(random.NextDouble(), 1.0 / 3.0);
@@ -239,6 +285,87 @@ namespace DotsStimulus
             double sine = Math.Sqrt(1 - cosine * cosine);
             var centre = SphereCentre();
             return centre + new DVector3(sine * Math.Sin(azimuth), cosine, sine * Math.Cos(azimuth)) * radius;
+        }
+
+        private void RespawnAfterFade(int index)
+        {
+            Positions[index] = Settings.fadeRespawnMode == FadeRespawnMode.Centre ? CoreCentre() : RandomPointInCore();
+            Velocities[index] = RandomSpatialDirection() * Settings.speed;
+        }
+
+        private void BeginFade(DVector3 origin, DVector3 velocity, double deltaSeconds)
+        {
+            double speed = velocity.Length;
+            if (speed < MatlabEpsilon) return;
+            DVector3 direction = velocity / speed;
+            if (!TryGetFadeExitDistances(origin, direction, out double coreExit, out double outerExit)) return;
+
+            double lifetime = Settings.fadeLifetimeMin + random.NextDouble() * (Settings.fadeLifetimeMax - Settings.fadeLifetimeMin);
+            double secondsToCore = coreExit / speed;
+            double elapsed = Math.Max(0, deltaSeconds - secondsToCore);
+            if (elapsed >= lifetime) return;
+            double availableDistance = Math.Max(0, outerExit - coreExit);
+            var dot = new FadingDot
+            {
+                StartPosition = origin + direction * coreExit,
+                Direction = direction,
+                TravelDistance = Math.Min(availableDistance, .5 * speed * lifetime),
+                Lifetime = lifetime,
+                Elapsed = elapsed
+            };
+            UpdateFadingDot(dot);
+            fadingDots.Add(dot);
+        }
+
+        private void AdvanceFadingDots(double deltaSeconds)
+        {
+            for (int i = fadingDots.Count - 1; i >= 0; i--)
+            {
+                FadingDot dot = fadingDots[i];
+                dot.Elapsed += deltaSeconds;
+                if (dot.Elapsed >= dot.Lifetime)
+                {
+                    fadingDots.RemoveAt(i);
+                    continue;
+                }
+                UpdateFadingDot(dot);
+            }
+        }
+
+        private static void UpdateFadingDot(FadingDot dot)
+        {
+            double progress = Clamp01(dot.Elapsed / dot.Lifetime);
+            double easedDistance = dot.TravelDistance * (2 * progress - progress * progress);
+            dot.Position = dot.StartPosition + dot.Direction * easedDistance;
+            dot.Opacity = 1 - progress;
+        }
+
+        private bool TryGetFadeExitDistances(DVector3 origin, DVector3 direction, out double coreExit, out double outerExit)
+        {
+            if (Settings.volumeShape == VolumeShape.Sphere)
+            {
+                DVector3 relative = origin - SphereCentre();
+                double projection = relative.x * direction.x + relative.y * direction.y + relative.z * direction.z;
+                double centreDistanceSquared = relative.x * relative.x + relative.y * relative.y + relative.z * relative.z;
+                double coreDiscriminant = projection * projection - centreDistanceSquared + Settings.sphereRadius * Settings.sphereRadius;
+                double outerRadius = Settings.sphereRadius + Settings.fadeBuffer;
+                double outerDiscriminant = projection * projection - centreDistanceSquared + outerRadius * outerRadius;
+                if (coreDiscriminant < 0 || outerDiscriminant < 0)
+                {
+                    coreExit = outerExit = 0;
+                    return false;
+                }
+                coreExit = Math.Max(0, -projection + Math.Sqrt(coreDiscriminant));
+                outerExit = Math.Max(0, -projection + Math.Sqrt(outerDiscriminant));
+                return outerExit > coreExit;
+            }
+
+            coreExit = RayBoxExit(origin, direction, Settings.width * .5, Settings.height * .5,
+                Settings.startDepth, Settings.startDepth + Settings.depth);
+            double buffer = Settings.fadeBuffer;
+            outerExit = RayBoxExit(origin, direction, Settings.width * .5 + buffer, Settings.height * .5 + buffer,
+                Settings.startDepth - buffer, Settings.startDepth + Settings.depth + buffer);
+            return !double.IsInfinity(coreExit) && !double.IsInfinity(outerExit) && outerExit > coreExit;
         }
 
         private bool TryBeginLinearBounce(int index, DVector3 origin, DVector3 velocity, double deltaSeconds,
@@ -340,6 +467,8 @@ namespace DotsStimulus
                 position.z < Settings.startDepth || position.z > Settings.startDepth + Settings.depth;
         }
 
+        public bool IsInsideCore(DVector3 position) => !IsOutsideCore(position);
+
         private bool TryGetBoundarySteering(DVector3 position, out DVector3 inward, out double normalizedPenetration)
         {
             if (Settings.volumeShape == VolumeShape.Sphere)
@@ -408,6 +537,10 @@ namespace DotsStimulus
             position = constrained;
             if (TryGetBoundarySteering(position, out DVector3 inward, out _)) velocity = inward * Settings.speed;
         }
+
+        private DVector3 CoreCentre() => Settings.volumeShape == VolumeShape.Sphere
+            ? SphereCentre()
+            : new DVector3(0, 0, Settings.startDepth + Settings.depth * .5);
 
         private DVector3 SphereCentre() => new DVector3(0, 0, Settings.startDepth + Settings.sphereRadius);
 

@@ -38,7 +38,7 @@ namespace DotsStimulus.Editor
 
             if (Object.FindAnyObjectByType<SranipalSafeBootstrap>() || Object.FindAnyObjectByType<EyeTrackingRecorder>())
             {
-                CancelPlay("This scene still contains the previous eye-tracking setup. Create a fresh scene with Tools > Dots Stimulus > Create VR stimulus. The new VR scene contains no eye tracking.");
+                CancelPlay("This scene still contains the previous eye-tracking setup. Create a fresh scene with Tools > Dots Stimulus > Create New Stimulus > VR Stimulus. The new VR scene contains no eye tracking.");
             }
         }
 

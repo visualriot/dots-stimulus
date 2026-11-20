@@ -10,66 +10,73 @@ namespace DotsStimulus
     public sealed class DotFieldRenderer : MonoBehaviour
     {
         [Header("Presentation mode")]
-        [Tooltip("Assigned by Stimulus Controller. This changes only how positions are displayed: Desktop uses a full-viewport 2D view or simulated-head 3D; VR uses immersive 3D or a virtual 2D display.")]
+        [Tooltip("How the participant views the dots. This is kept in sync with Stimulus Controller.")]
         public StimulusPresentationMode presentationMode = StimulusPresentationMode.Desktop;
 
         [Header("Dots")]
-        [Tooltip("Shader that draws the white circular dots. Assigned automatically; researchers normally should not change it.")]
+        [Tooltip("Draws the white dots. Assigned automatically; normally leave this unchanged.")]
         public Shader dotShader;
-        [Tooltip("Shader that draws the dark-grey aperture frame. Assigned automatically; researchers normally should not change it.")]
+        [Tooltip("Draws the dark aperture frame. Assigned automatically; normally leave this unchanged.")]
         public Shader frameShader;
-        [Tooltip("Dot diameter in render pixels. MATLAB uses glPointSize(6), so the source default is 6 pixels.")]
+        [Tooltip("Width of each dot in screen pixels when Use Angular Size is off. Default: 6 pixels.")]
         [Min(1)] public float diameterPixels = 6;
-        [Tooltip("Off: use Diameter Pixels exactly, matching MATLAB. On: keep approximately the same angular diameter when resolution or headset rendering scale changes.")]
+        [Tooltip("Keep approximately the same apparent dot size when display resolution or headset render scale changes.")]
         public bool useAngularSize;
-        [Tooltip("Dot angular diameter in degrees when Use Angular Size is on. 0.3528 degrees corresponds to 6 pixels on the MATLAB 800x600, 0.587 m-wide display viewed from 0.715 m.")]
+        [Tooltip("Apparent dot width in degrees when Use Angular Size is on. Default: 0.3528 degrees.")]
         [Min(.001f)] public float diameterDegrees = .3528f;
-        [Tooltip("Mirror only the displayed X coordinate to reproduce MATLAB/OpenGL's camera orientation. Simulation positions and neighbour distances are never mirrored.")]
+        [Tooltip("Flip the displayed image left-to-right to match the source experiment. This does not change movement or neighbour distances.")]
         public bool mirrorMatlabX = true;
+        [Tooltip("3D only. Give dots a fixed size in metres so distant dots look smaller. Turn off only to keep the old constant on-screen size in 3D.")]
+        public bool useWorldSizeIn3D = true;
+        [Tooltip("3D dot diameter in metres when Use World Size In 3D is on. Default: 0.06 m (6 cm).")]
+        [Min(.001f)] public float diameterMetres = .06f;
 
         [Header("Desktop presentation")]
-        [Tooltip("Desktop only. Scale the 2D plane onto the complete Game-view viewport, like a 2D application. This affects display only; the simulation remains a 20x20 m plane by default.")]
+        [Tooltip("Desktop 2D only. Fill the complete Game view. This changes only the display, not dot movement or distances.")]
         public bool fillDesktop2DViewport = true;
         [HideInInspector] public bool centreDesktop3DOnViewer = true;
 
         [Header("3D viewer placement")]
-        [Tooltip("3D only. Centre places the viewer at the volume centre. Outside places the volume straight ahead of the viewer.")]
+        [Tooltip("3D only. Centre surrounds the viewer with the volume. Outside puts the whole volume directly in front.")]
         public ViewerPlacement viewerPlacement = ViewerPlacement.Centre;
-        [Tooltip("3D Outside mode only. Empty distance in metres from the viewer to the nearest box face or sphere surface.")]
+        [Tooltip("Outside mode only. Empty distance in metres from the viewer to the nearest surface of the box or sphere.")]
         [Min(0f)] public float outsideClearance = 10f;
-        [SerializeField, HideInInspector] private int threeDPlacementSerializationVersion = 1;
+        [SerializeField, HideInInspector] private int threeDPlacementSerializationVersion = 2;
 
         [Header("MATLAB desktop aperture")]
-        [Tooltip("MATLAB use_aperture: show or hide the dark-grey window frame that masks the box edges. A toggles it at runtime. Desktop full-viewport 2D starts with it off.")]
+        [Tooltip("Show a dark frame around the stimulus. Press A during Play to show or hide it.")]
         public bool useAperture = true;
-        [Tooltip("MATLAB z_frame: distance from the eye/camera to the aperture plane, in metres. The source places it at the physical monitor distance, 0.715 m.")]
+        [Tooltip("Distance in metres from the viewer to the aperture frame. Default: 0.715 m.")]
         [Min(.01f)] public float frameDistance = .715f;
-        [Tooltip("Outer half-width covered by the aperture bars. MATLAB uses Screenwidth_m (0.587 m) as an intentionally oversized buffer so the frame reaches beyond the monitor edges.")]
+        [Tooltip("How far the aperture frame extends horizontally from its centre. Normally leave this at the default.")]
         [FormerlySerializedAs("frameOuterExtent")]
         [Min(.01f)] public float frameOuterWidth = .587f;
-        [Tooltip("Outer half-height covered by the aperture bars. MATLAB uses Screenheight_m = Screenwidth_m / aspect, giving 0.44025 m at 800x600, as an oversized buffer.")]
+        [Tooltip("How far the aperture frame extends vertically from its centre. Normally leave this at the default.")]
         [Min(.01f)] public float frameOuterHeight = .44025f;
 
         [Header("VR immersive 3D")]
         [HideInInspector] public bool centreVrVolumeOnViewer = true;
-        [Tooltip("Show the MATLAB monitor-style aperture while dots surround the viewer. Normally off because it blocks immersion; it does not change the swarm simulation.")]
+        [Tooltip("VR 3D only. Show the aperture frame while dots surround the viewer. Normally leave this off so it does not block the view.")]
         public bool useApertureInImmersive3D;
 
         [Header("VR 2D display (metres)")]
-        [Tooltip("Width of the virtual screen shown after pressing D in VR. MATLAB Screenwidth_m default: 0.587 m (58.7 cm).")]
+        [Tooltip("Width in metres of the virtual screen used for VR 2D. Default: 0.587 m.")]
         [Min(.05f)] public float vr2DDisplayWidth = .587f;
-        [Tooltip("Height of the virtual VR screen. MATLAB derives Screenheight_m from width/aspect; at 800x600 the default is 0.44025 m (44.025 cm).")]
+        [Tooltip("Height in metres of the virtual screen used for VR 2D. Default: 0.44025 m.")]
         [Min(.05f)] public float vr2DDisplayHeight = .44025f;
-        [Tooltip("Eye-to-screen distance for VR 2D, in metres. MATLAB distance_to_screen_m default: 0.715 m (71.5 cm).")]
+        [Tooltip("Distance in metres from the headset to the virtual VR 2D screen. Default: 0.715 m.")]
         [Min(.05f)] public float vr2DDisplayDistance = .715f;
-        [Tooltip("Width of the dark-grey border outside the VR 2D display, in metres. This is a VR presentation setting, not a neighbour or simulation boundary.")]
+        [Tooltip("Width in metres of the dark border around the VR 2D screen. This does not affect dot movement boundaries.")]
         [Min(0f)] public float vr2DFrameBorder = .04f;
 
-        private Mesh dots, frame;
+        private Mesh dots, fadingDots, frame;
         private Material dotsMaterial, frameMaterial;
-        private MeshRenderer dotsRenderer;
-        private GameObject frameObject;
+        private MeshRenderer dotsRenderer, fadingDotsRenderer;
+        private GameObject fadingDotsObject, frameObject;
         private Vector3[] vertices;
+        private Vector3[] fadingVertices;
+        private Color32[] fadingColours;
+        private int fadingCapacity;
         private SwarmSettings layout;
         private bool lastDimension2D;
         private Camera presentationCamera;
@@ -82,7 +89,7 @@ namespace DotsStimulus
         {
             layout = simulation.Settings;
             lastDimension2D = layout.dimension2D;
-            if (!dotShader || !frameShader) throw new System.InvalidOperationException("Assign both shaders, or create a scene from Tools > Dots Stimulus.");
+            if (!dotShader || !frameShader) throw new System.InvalidOperationException("Assign both shaders, or create a scene from Tools > Dots Stimulus > Create New Stimulus.");
             dots = new Mesh { name = "Dot centres and billboard corners" };
             dots.MarkDynamic();
             vertices = new Vector3[layout.count * 4];
@@ -96,13 +103,25 @@ namespace DotsStimulus
                 triangles[t] = q; triangles[t + 1] = q + 1; triangles[t + 2] = q + 2;
                 triangles[t + 3] = q; triangles[t + 4] = q + 2; triangles[t + 5] = q + 3;
             }
-            dots.vertices = vertices; dots.uv = uv; dots.triangles = triangles;
+            var opaque = new Color32[vertices.Length];
+            for (int i = 0; i < opaque.Length; i++) opaque[i] = new Color32(255, 255, 255, 255);
+            dots.vertices = vertices; dots.uv = uv; dots.colors32 = opaque; dots.triangles = triangles;
             GetComponent<MeshFilter>().sharedMesh = dots;
             dotsMaterial = new Material(dotShader) { name = "White stimulus dots", enableInstancing = true };
             dotsRenderer = GetComponent<MeshRenderer>();
             dotsRenderer.sharedMaterial = dotsMaterial;
             dotsRenderer.shadowCastingMode = ShadowCastingMode.Off;
             dotsRenderer.receiveShadows = false;
+            fadingDotsObject = new GameObject("Fading dots (generated)", typeof(MeshFilter), typeof(MeshRenderer));
+            fadingDotsObject.transform.SetParent(transform, false);
+            fadingDots = new Mesh { name = "Fading dot centres and billboard corners", indexFormat = IndexFormat.UInt32 };
+            fadingDots.MarkDynamic();
+            fadingDotsObject.GetComponent<MeshFilter>().sharedMesh = fadingDots;
+            fadingDotsRenderer = fadingDotsObject.GetComponent<MeshRenderer>();
+            fadingDotsRenderer.sharedMaterial = dotsMaterial;
+            fadingDotsRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            fadingDotsRenderer.receiveShadows = false;
+            fadingDotsRenderer.enabled = false;
             frameObject = new GameObject("Aperture (generated)", typeof(MeshFilter), typeof(MeshRenderer));
             frameObject.transform.SetParent(transform, false);
             frame = new Mesh { name = "Four aperture bars" };
@@ -132,11 +151,14 @@ namespace DotsStimulus
             dots.vertices = vertices;
             dots.RecalculateBounds();
             var bounds = dots.bounds;
-            bounds.Expand(2f); // Include billboard extent around centre-only mesh vertices.
+            bounds.Expand(Mathf.Max(2f, diameterMetres * 2f)); // Include billboard extent around centre-only mesh vertices.
             dots.bounds = bounds;
+            PresentFadingDots(simulation);
             dotsMaterial.SetFloat("_DiameterPixels", diameterPixels);
             dotsMaterial.SetFloat("_DiameterDegrees", diameterDegrees);
             dotsMaterial.SetFloat("_UseAngularSize", useAngularSize ? 1 : 0);
+            dotsMaterial.SetFloat("_DiameterMetres", diameterMetres);
+            dotsMaterial.SetFloat("_UseWorldSize", UsesWorldSize(simulation.Settings) ? 1 : 0);
             bool immersive3D = IsImmersive3D(simulation.Settings);
             bool visibleAperture = useAperture && (!immersive3D || useApertureInImmersive3D);
             bool mapped2D = simulation.Settings.dimension2D &&
@@ -147,6 +169,62 @@ namespace DotsStimulus
             dotsMaterial.SetFloat("_MinimumDepth", immersive3D ? -1000000f :
                 (mapped2D ? mapped2DDepth - .001f : (useAperture ? frameDistance : .01f)));
             frameObject.SetActive(visibleAperture);
+        }
+
+        private void PresentFadingDots(SwarmSimulation simulation)
+        {
+            int count = simulation.FadingDots.Count;
+            if (count == 0)
+            {
+                fadingDotsRenderer.enabled = false;
+                return;
+            }
+
+            EnsureFadingCapacity(count);
+            for (int i = 0; i < fadingColours.Length; i++) fadingColours[i] = new Color32(255, 255, 255, 0);
+            for (int i = 0; i < count; i++)
+            {
+                SwarmSimulation.FadingDot fading = simulation.FadingDots[i];
+                Vector3 centre = MapPositionForPresentation(fading.Position, simulation.Settings);
+                byte alpha = (byte)Mathf.RoundToInt(Mathf.Clamp01((float)fading.Opacity) * 255);
+                var colour = new Color32(255, 255, 255, alpha);
+                int q = i * 4;
+                for (int j = 0; j < 4; j++)
+                {
+                    fadingVertices[q + j] = centre;
+                    fadingColours[q + j] = colour;
+                }
+            }
+            fadingDots.vertices = fadingVertices;
+            fadingDots.colors32 = fadingColours;
+            fadingDots.RecalculateBounds();
+            var bounds = fadingDots.bounds;
+            bounds.Expand(Mathf.Max(2f, diameterMetres * 2f));
+            fadingDots.bounds = bounds;
+            fadingDotsRenderer.enabled = true;
+        }
+
+        private void EnsureFadingCapacity(int required)
+        {
+            if (required <= fadingCapacity) return;
+            fadingCapacity = Mathf.NextPowerOfTwo(Mathf.Max(16, required));
+            fadingVertices = new Vector3[fadingCapacity * 4];
+            fadingColours = new Color32[fadingVertices.Length];
+            var uv = new Vector2[fadingVertices.Length];
+            var triangles = new int[fadingCapacity * 6];
+            for (int i = 0; i < fadingCapacity; i++)
+            {
+                int q = i * 4, t = i * 6;
+                uv[q] = new Vector2(-1, -1); uv[q + 1] = new Vector2(-1, 1);
+                uv[q + 2] = new Vector2(1, 1); uv[q + 3] = new Vector2(1, -1);
+                triangles[t] = q; triangles[t + 1] = q + 1; triangles[t + 2] = q + 2;
+                triangles[t + 3] = q; triangles[t + 4] = q + 2; triangles[t + 5] = q + 3;
+            }
+            fadingDots.Clear();
+            fadingDots.vertices = fadingVertices;
+            fadingDots.uv = uv;
+            fadingDots.colors32 = fadingColours;
+            fadingDots.triangles = triangles;
         }
 
         public Vector3 MapPositionForPresentation(DVector3 position, SwarmSettings settings)
@@ -175,6 +253,8 @@ namespace DotsStimulus
 
             return MapThreeDimensionalPosition(x, y, position, settings);
         }
+
+        public bool UsesWorldSize(SwarmSettings settings) => !settings.dimension2D && useWorldSizeIn3D;
 
         private Vector3 MapThreeDimensionalPosition(float x, float y, DVector3 position, SwarmSettings settings)
         {
@@ -264,28 +344,39 @@ namespace DotsStimulus
             vr2DDisplayDistance = Mathf.Max(.05f, vr2DDisplayDistance);
             vr2DFrameBorder = Mathf.Max(0, vr2DFrameBorder);
             outsideClearance = Mathf.Max(0, outsideClearance);
+            diameterMetres = Mathf.Max(.001f, diameterMetres);
             BuildFrame();
         }
         private void MigrateThreeDPlacement()
         {
-            if (threeDPlacementSerializationVersion >= 1) return;
-            viewerPlacement = ViewerPlacement.Centre;
-            outsideClearance = 10f;
-            threeDPlacementSerializationVersion = 1;
+            if (threeDPlacementSerializationVersion < 1)
+            {
+                viewerPlacement = ViewerPlacement.Centre;
+                outsideClearance = 10f;
+            }
+            if (threeDPlacementSerializationVersion < 2)
+            {
+                useWorldSizeIn3D = true;
+                diameterMetres = .06f;
+            }
+            threeDPlacementSerializationVersion = 2;
         }
         private void OnDisable()
         {
             if (dotsRenderer) dotsRenderer.enabled = false;
+            if (fadingDotsRenderer) fadingDotsRenderer.enabled = false;
             if (frameObject) frameObject.SetActive(false);
         }
         private void OnEnable() { if (dotsRenderer) dotsRenderer.enabled = true; }
         private void OnDestroy()
         {
             if (dots) Destroy(dots);
+            if (fadingDots) Destroy(fadingDots);
             if (frame) Destroy(frame);
             if (dotsMaterial) Destroy(dotsMaterial);
             if (frameMaterial) Destroy(frameMaterial);
             if (frameObject) Destroy(frameObject);
+            if (fadingDotsObject) Destroy(fadingDotsObject);
         }
     }
 }

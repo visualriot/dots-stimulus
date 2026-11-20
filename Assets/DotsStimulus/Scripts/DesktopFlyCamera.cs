@@ -12,33 +12,33 @@ namespace DotsStimulus
     public sealed class DesktopFlyCamera : MonoBehaviour
     {
         [Header("Desktop head simulation (3D only)")]
-        [Tooltip("Stop the globally configured XR loader in desktop scenes and force this camera to render a normal monoscopic Game view.")]
+        [Tooltip("Desktop only. Keep headset/XR rendering off so the Game view is a normal single screen. Normally leave this on.")]
         public bool disableXrForDesktop = true;
-        [Tooltip("Degrees per mouse-delta unit while the right mouse button is held in 3D.")]
+        [Tooltip("How quickly right-mouse dragging turns the view in 3D. Larger values turn faster.")]
         [Min(.001f)] public float mouseSensitivity = .12f;
-        [Tooltip("I/J/K/L pitch/yaw speed in degrees per second.")]
+        [Tooltip("How quickly I/J/K/L turn the view in 3D, in degrees per second.")]
         [Min(.01f)] public float keyboardRotationSpeed = 60f;
-        [Tooltip("Maximum upward or downward simulated-head rotation in 3D, in degrees. This prevents the desktop camera from flipping over.")]
+        [Tooltip("Maximum amount the desktop view can look up or down. Prevents the camera from flipping over.")]
         [Range(1, 89.9f)] public float maximumPitch = 89f;
-        [Tooltip("Desktop 3D only. Metres moved along the current viewing direction for one mouse-wheel notch. Wheel up moves closer; wheel down moves farther away.")]
+        [Tooltip("Desktop 3D only. Distance moved forward or backward for each mouse-wheel step, in metres.")]
         [Min(.001f)] public float scrollZoomMetresPerNotch = 1f;
-        [Tooltip("Desktop 3D only. Metres moved sideways or vertically for each pixel of middle-mouse drag.")]
+        [Tooltip("Desktop 3D only. Sideways or vertical movement for each pixel of middle-mouse drag, in metres.")]
         [Min(.0001f)] public float middleDragPanMetresPerPixel = .01f;
 
         [Header("MATLAB display geometry")]
-        [Tooltip("Physical monitor width in metres (587 mm in the MATLAB source).")]
+        [Tooltip("Physical width represented by the desktop display, in metres. Default: 0.587 m.")]
         [Min(.01f)] public float displayWidthMetres = .587f;
-        [Tooltip("Eye-to-display distance in metres (715 mm in the MATLAB source).")]
+        [Tooltip("Assumed distance from the viewer to the desktop display, in metres. Used to calculate field of view.")]
         [Min(.01f)] public float viewingDistanceMetres = .715f;
-        [Tooltip("MATLAB reference window width in pixels. The active source window is 800x600; this is used when viewport adaptation is off.")]
+        [Tooltip("Reference display width in pixels. Used only when Adapt Field Of View To Viewport is off.")]
         [Min(1)] public int referenceWidthPixels = 800;
-        [Tooltip("MATLAB reference window height in pixels. The active source window is 800x600; this is used when viewport adaptation is off.")]
+        [Tooltip("Reference display height in pixels. Used only when Adapt Field Of View To Viewport is off.")]
         [Min(1)] public int referenceHeightPixels = 600;
-        [Tooltip("Derive display height and vertical FOV from the active Game-view aspect, like MATLAB's Screenheight = Screenwidth / aspect. Disable for a fixed 800x600 reference projection.")]
+        [Tooltip("Adjust field of view to the current Game-view shape. Turn off to use the fixed reference width and height.")]
         public bool adaptFieldOfViewToViewport = true;
-        [Tooltip("Nearest distance rendered by the desktop camera, in metres. MATLAB z_near is 0.01 m.")]
+        [Tooltip("Objects closer than this distance are not drawn. Normally leave at 0.01 m.")]
         [Min(.001f)] public float nearClipMetres = .01f;
-        [Tooltip("Farthest distance rendered by the desktop camera, in metres. MATLAB uses total_depth x 2 = 140 m with the default z=50-70 m volume.")]
+        [Tooltip("Objects farther than this distance are not drawn. Increase it only if a large or distant volume is being cut off.")]
         [Min(.1f)] public float farClipMetres = 140f;
 
         private float yaw;

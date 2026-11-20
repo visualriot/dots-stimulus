@@ -37,12 +37,18 @@ namespace DotsStimulus.Editor.Tests
                 var renderer = stimulus.GetComponent<DotFieldRenderer>();
                 Assert.That(renderer.useAperture, Is.False);
                 Assert.That(renderer.fillDesktop2DViewport, Is.True);
+                Assert.That(renderer.useWorldSizeIn3D, Is.True);
+                Assert.That(renderer.diameterMetres, Is.EqualTo(.06f));
                 Assert.That(renderer.viewerPlacement, Is.EqualTo(ViewerPlacement.Centre));
                 Assert.That(renderer.outsideClearance, Is.EqualTo(10));
                 Assert.That(stimulus.settings.volumeShape, Is.EqualTo(VolumeShape.Box));
                 Assert.That(stimulus.settings.sphereRadius, Is.EqualTo(10));
                 Assert.That(stimulus.settings.boundaryBuffer, Is.EqualTo(1));
                 Assert.That(stimulus.settings.boundaryMode, Is.EqualTo(BoundaryMode.MagneticSteering));
+                Assert.That(stimulus.settings.fadeBuffer, Is.EqualTo(2));
+                Assert.That(stimulus.settings.fadeLifetimeMin, Is.EqualTo(1));
+                Assert.That(stimulus.settings.fadeLifetimeMax, Is.EqualTo(2));
+                Assert.That(stimulus.settings.fadeRespawnMode, Is.EqualTo(FadeRespawnMode.Centre));
                 Assert.That(stimulus.viewer.GetUniversalAdditionalCameraData().allowXRRendering, Is.False);
                 DesktopFlyCamera desktopCamera = stimulus.viewer.GetComponent<DesktopFlyCamera>();
                 Assert.That(desktopCamera.DerivedVerticalFieldOfView, Is.EqualTo(34.2238f).Within(.01f));
@@ -67,12 +73,18 @@ namespace DotsStimulus.Editor.Tests
                 Assert.That(stimulus.presentationMode, Is.EqualTo(StimulusPresentationMode.VirtualReality));
                 Assert.That(stimulus.settings.dimension2D, Is.False);
                 Assert.That(stimulus.GetComponent<DotFieldRenderer>().useAperture, Is.True);
+                Assert.That(stimulus.GetComponent<DotFieldRenderer>().useWorldSizeIn3D, Is.True);
+                Assert.That(stimulus.GetComponent<DotFieldRenderer>().diameterMetres, Is.EqualTo(.06f));
                 Assert.That(stimulus.GetComponent<DotFieldRenderer>().viewerPlacement, Is.EqualTo(ViewerPlacement.Centre));
                 Assert.That(stimulus.GetComponent<DotFieldRenderer>().outsideClearance, Is.EqualTo(10));
                 Assert.That(stimulus.settings.volumeShape, Is.EqualTo(VolumeShape.Box));
                 Assert.That(stimulus.settings.sphereRadius, Is.EqualTo(10));
                 Assert.That(stimulus.settings.boundaryBuffer, Is.EqualTo(1));
                 Assert.That(stimulus.settings.boundaryMode, Is.EqualTo(BoundaryMode.MagneticSteering));
+                Assert.That(stimulus.settings.fadeBuffer, Is.EqualTo(2));
+                Assert.That(stimulus.settings.fadeLifetimeMin, Is.EqualTo(1));
+                Assert.That(stimulus.settings.fadeLifetimeMax, Is.EqualTo(2));
+                Assert.That(stimulus.settings.fadeRespawnMode, Is.EqualTo(FadeRespawnMode.Centre));
                 Assert.That(origin, Is.Not.Null);
                 Assert.That(origin.Camera.GetUniversalAdditionalCameraData().allowXRRendering, Is.True);
                 Assert.That(origin.Camera.GetComponent<TrackedPoseDriver>(), Is.Not.Null);
@@ -167,6 +179,7 @@ namespace DotsStimulus.Editor.Tests
                 renderer.presentationMode = StimulusPresentationMode.VirtualReality;
                 renderer.mirrorMatlabX = false;
                 var settings = new SwarmSettings { width = 20, height = 20, depth = 20, startDepth = 50, dimension2D = false };
+                Assert.That(renderer.UsesWorldSize(settings), Is.True, "3D should use world-space size so distance changes apparent size");
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 50), settings).z, Is.EqualTo(-10).Within(1e-5));
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 60), settings).z, Is.EqualTo(0).Within(1e-5));
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 70), settings).z, Is.EqualTo(10).Within(1e-5));
@@ -183,6 +196,7 @@ namespace DotsStimulus.Editor.Tests
                 Assert.That(renderer.MapPositionForPresentation(new DVector3(0, 0, 64), settings).z, Is.EqualTo(18).Within(1e-5));
 
                 settings.dimension2D = true;
+                Assert.That(renderer.UsesWorldSize(settings), Is.False, "2D should keep screen-based sizing");
                 Vector3 corner = renderer.MapPositionForPresentation(new DVector3(10, 10, 50), settings);
                 Assert.That(corner.x, Is.EqualTo(renderer.vr2DDisplayWidth * .5f).Within(1e-5));
                 Assert.That(corner.y, Is.EqualTo(renderer.vr2DDisplayHeight * .5f).Within(1e-5));
@@ -342,6 +356,139 @@ namespace DotsStimulus.Editor.Tests
                 Assert.That(cameraObject.transform.position, Is.EqualTo(position2D), "2D must ignore middle-drag panning");
             }
             finally { UnityEngine.Object.DestroyImmediate(cameraObject); }
+        }
+
+        [Test]
+        public void ViewerPlacementToggleChangesPresentationWithoutRestarting()
+        {
+            var stimulusObject = new GameObject("Stimulus");
+            var viewerObject = new GameObject("Viewer", typeof(Camera));
+            try
+            {
+                var renderer = stimulusObject.AddComponent<DotFieldRenderer>();
+                var controller = stimulusObject.AddComponent<StimulusController>();
+                controller.viewer = viewerObject.GetComponent<Camera>();
+                renderer.viewerPlacement = ViewerPlacement.Centre;
+                viewerObject.transform.SetPositionAndRotation(new Vector3(2, 3, 4), Quaternion.Euler(15, 125, 0));
+                string eventName = null, detail = null;
+                controller.ControlEvent += (name, value) => { eventName = name; detail = value; };
+
+                controller.ToggleViewerPlacement();
+                Assert.That(renderer.viewerPlacement, Is.EqualTo(ViewerPlacement.Outside));
+                Assert.That(stimulusObject.transform.position, Is.EqualTo(viewerObject.transform.position));
+                Assert.That(Quaternion.Angle(stimulusObject.transform.rotation, viewerObject.transform.rotation), Is.LessThan(1e-5));
+                Assert.That(eventName, Is.EqualTo("viewer_placement"));
+                Assert.That(detail, Is.EqualTo("outside"));
+                var settings = new SwarmSettings { dimension2D = false, width = 20, height = 20, depth = 20, startDepth = 50 };
+                Vector3 nearFace = stimulusObject.transform.TransformPoint(
+                    renderer.MapPositionForPresentation(new DVector3(0, 0, 50), settings));
+                Vector3 expectedNearFace = viewerObject.transform.position + viewerObject.transform.forward * renderer.outsideClearance;
+                Assert.That(Vector3.Distance(nearFace, expectedNearFace), Is.LessThan(1e-5), "Outside must be directly ahead of the current view");
+
+                viewerObject.transform.SetPositionAndRotation(new Vector3(-3, 1, 8), Quaternion.Euler(-10, 35, 0));
+                controller.ToggleViewerPlacement();
+                Assert.That(renderer.viewerPlacement, Is.EqualTo(ViewerPlacement.Centre));
+                Assert.That(stimulusObject.transform.position, Is.EqualTo(viewerObject.transform.position));
+                Assert.That(Quaternion.Angle(stimulusObject.transform.rotation, viewerObject.transform.rotation), Is.LessThan(1e-5));
+                Assert.That(detail, Is.EqualTo("centre"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(stimulusObject);
+                UnityEngine.Object.DestroyImmediate(viewerObject);
+            }
+        }
+
+        [Test]
+        public void FadeModeKeepsBoxPopulationInsideAndRemovesFadingCopy()
+        {
+            var settings = FadeSettings(VolumeShape.Box, FadeRespawnMode.Centre);
+            var simulation = new SwarmSimulation(settings, 1234);
+            simulation.Positions[0] = new DVector3(9.9, 0, 60);
+            simulation.Velocities[0] = new DVector3(3, 0, 0);
+
+            simulation.Step(.1);
+
+            Assert.That(simulation.Positions.Length, Is.EqualTo(settings.count));
+            Assert.That(simulation.Positions.All(simulation.IsInsideCore), Is.True);
+            Assert.That(simulation.Positions[0].x, Is.EqualTo(0).Within(1e-9));
+            Assert.That(simulation.Positions[0].y, Is.EqualTo(0).Within(1e-9));
+            Assert.That(simulation.Positions[0].z, Is.EqualTo(60).Within(1e-9));
+            Assert.That(simulation.FadingDots.Count, Is.EqualTo(1));
+            SwarmSimulation.FadingDot fading = simulation.FadingDots[0];
+            Assert.That(fading.Lifetime, Is.InRange(1.0, 2.0));
+            Assert.That(fading.Opacity, Is.InRange(0.0, 1.0));
+            Assert.That(fading.Position.x, Is.InRange(10.0, 12.0));
+            double initialOpacity = fading.Opacity;
+
+            simulation.Step(.5);
+            Assert.That(simulation.Positions.All(simulation.IsInsideCore), Is.True);
+            Assert.That(simulation.FadingDots[0].Opacity, Is.LessThan(initialOpacity));
+            Assert.That(simulation.FadingDots[0].Position.x, Is.InRange(10.0, 12.0));
+
+            simulation.Step(2);
+            Assert.That(simulation.FadingDots, Is.Empty);
+            Assert.That(simulation.Positions.All(simulation.IsInsideCore), Is.True);
+        }
+
+        [Test]
+        public void FadeModeSupportsSphereAndRandomWithinCoreRespawn()
+        {
+            var settings = FadeSettings(VolumeShape.Sphere, FadeRespawnMode.RandomWithinCore);
+            var simulation = new SwarmSimulation(settings, 5678);
+            simulation.Positions[0] = new DVector3(9.9, 0, 60);
+            simulation.Velocities[0] = new DVector3(3, 0, 0);
+
+            simulation.Step(.1);
+
+            Assert.That(simulation.FadingDots.Count, Is.EqualTo(1));
+            Assert.That(simulation.FadingDots[0].Position.x, Is.InRange(10.0, 12.0));
+            Assert.That(simulation.Positions.All(simulation.IsInsideCore), Is.True);
+            DVector3 respawned = simulation.Positions[0];
+            Assert.That(Math.Abs(respawned.x) + Math.Abs(respawned.y) + Math.Abs(respawned.z - 60), Is.GreaterThan(1e-9));
+        }
+
+        [Test]
+        public void FadeModeRestoresEveryEscapingSlotInSameStep()
+        {
+            var settings = FadeSettings(VolumeShape.Box, FadeRespawnMode.Centre);
+            settings.count = 8;
+            settings.topologicalK = 2;
+            settings.width = settings.height = settings.depth = 2;
+            settings.startDepth = 5;
+            settings.speed = 10;
+            var simulation = new SwarmSimulation(settings, 9012);
+
+            for (int step = 0; step < 12; step++)
+            {
+                simulation.Step(.25);
+                Assert.That(simulation.Positions.Length, Is.EqualTo(settings.count));
+                Assert.That(simulation.Positions.All(simulation.IsInsideCore), Is.True, $"step {step}");
+            }
+        }
+
+        private static SwarmSettings FadeSettings(VolumeShape shape, FadeRespawnMode respawnMode)
+        {
+            return new SwarmSettings
+            {
+                count = 1,
+                topologicalK = 1,
+                dimension2D = false,
+                rule = NeighbourRule.Metric,
+                metricRadius = 0,
+                speed = 3,
+                width = 20,
+                height = 20,
+                depth = 20,
+                startDepth = 50,
+                volumeShape = shape,
+                sphereRadius = 10,
+                boundaryMode = BoundaryMode.FadeAndRespawn,
+                fadeBuffer = 2,
+                fadeLifetimeMin = 1,
+                fadeLifetimeMax = 2,
+                fadeRespawnMode = respawnMode
+            };
         }
 
         [Test]
